@@ -1,21 +1,35 @@
 //! 實際文件的回歸測試（需要 vendor/pdfium/pdfium.dll，先執行 scripts/fetch-pdfium.ps1）
 
+//! 找不到 DLL 時測試會略過但仍顯示 ok；設定 `PDFWORD_REQUIRE_PDFIUM=1` 可改為直接失敗。
+
 use pdfword::model::{Block, Paragraph, PageLayout};
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
 fn layout(fixture: &str) -> Option<PageLayout> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let dll = root.join("vendor/pdfium");
+    let dll = root.join("vendor").join("pdfium");
     if !dll.join("pdfium.dll").exists() {
-        eprintln!("略過：找不到 pdfium.dll");
+        let msg = format!(
+            "找不到 {}，回歸測試「{fixture}」沒有執行（請先執行 scripts/fetch-pdfium.ps1）",
+            dll.join("pdfium.dll").display()
+        );
+        if std::env::var_os("PDFWORD_REQUIRE_PDFIUM").is_some() {
+            panic!("{msg}");
+        }
+        // 直接寫入 stderr：eprintln! 會被測試框架攔截，通過的測試不會顯示
+        let _ = writeln!(std::io::stderr().lock(), "\n!!!!!!!! 警告：{msg} !!!!!!!!\n");
         return None;
     }
     pdfword::extract::init(&dll).unwrap();
     let doc = pdfword::extract::extract_document(&root.join("tests/fixtures").join(fixture), &AtomicBool::new(false), |_, _| {})
         .unwrap();
     let body = pdfword::layout::body_size(&doc.pages);
-    Some(pdfword::layout::analyze(&doc.pages[0], body))
+    let l = pdfword::layout::analyze(&doc.pages[0], body);
+    // 平常被攔截；`cargo test -- --show-output` 時可看到，用來確認測試確實執行
+    println!("已執行：{fixture}，{} 個區塊", l.blocks.len());
+    Some(l)
 }
 
 fn paragraphs(l: &PageLayout) -> Vec<&Paragraph> {

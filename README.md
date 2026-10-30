@@ -25,7 +25,8 @@ Windows x64 桌面程式：把 PDF 批次轉換成可編輯的 Word（DOCX），
 ```powershell
 pwsh -File scripts\fetch-pdfium.ps1   # 下載 PDFium 到 vendor\pdfium（驗證 SHA-256）
 cargo run                             # 開發執行（debug 版會從 vendor\pdfium 載入 DLL）
-cargo test                            # 單元測試 + 整合測試
+cargo test                            # 單元測試 + 整合測試（缺 pdfium.dll 時整合測試略過並顯示警告）
+$env:PDFWORD_REQUIRE_PDFIUM=1; cargo test --test regression -- --show-output   # 確認回歸測試確實執行
 pwsh -File scripts\build.ps1          # 產生 dist\pdfword-<版本>-portable-x64.zip 與 dist\pdfword-<版本>-x64.msi
 ```
 
