@@ -7,7 +7,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="PDF 轉 Word"
-           Manufacturer="kaido-MSVC"
+           Manufacturer="Kaido-MSVC"
            Version="$(Version)"
            UpgradeCode="b8378673-ea26-49a6-aaa0-8058415bc7d6"
            Scope="perMachine"
