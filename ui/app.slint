@@ -1,0 +1,15 @@
+import { Button, VerticalBox } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    title: "PDF 轉 Word";
+    default-font-family: "Microsoft JhengHei UI";
+    preferred-width: 720px;
+    preferred-height: 480px;
+
+    in property <string> status: "就緒";
+
+    VerticalBox {
+        Text { text: "PDF 轉 Word"; font-size: 20px; }
+        Text { text: root.status; }
+    }
+}

@@ -1,0 +1,4 @@
+# 以 LLVM lld-link 連結；仍使用 MSVC CRT 與 Windows SDK 程式庫
+[target.x86_64-pc-windows-msvc]
+linker = "C:/Program Files/LLVM/bin/lld-link.exe"
+rustflags = ["-C", "target-feature=+crt-static"]
