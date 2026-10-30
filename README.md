@@ -4,6 +4,12 @@ Windows x64 桌面程式：把 PDF 批次轉換成可編輯的 Word（DOCX），
 
 使用方式見 [docs/使用說明.txt](docs/使用說明.txt)。
 
+## 正式下載
+
+[v0.1.0 Release](https://github.com/Kaido-MSVC/pdfword/releases/tag/v0.1.0) 提供 Windows x64 Portable 與 MSI，請以 Release 內的 SHA256SUMS.txt 核對下載檔案。
+
+程式與安裝程式均未數位簽章。採流式重排，不保證所有 PDF 都能完全還原；不含 OCR。MSI 已核對負載內容，尚無實際安裝／解除安裝驗收紀錄。完整驗證範圍與限制見 [v0.1.0 發布說明](docs/RELEASE-v0.1.0.md)。
+
 ## 技術組成
 
 | 項目 | 採用 | 授權 |
@@ -54,3 +60,7 @@ scripts/              下載、建置、授權聲明、圖示與開發測試工�
 - `scripts\word-check.ps1 <docx...>`：以 Word 開啟驗證並匯出 PDF
 - `scripts\make-fixtures.ps1`：以 Edge 由 `tests\fixtures\src\*.html` 產生測試 PDF
 - `scripts\ui-e2e.ps1 [-Exe <路徑>]`：以 UI Automation 操作 GUI 做端到端轉換測試
+
+## 專案授權與測試資料
+
+專案程式碼依 [MIT](LICENSE) 授權，第三方元件依各自條款授權，請保留其授權文件。官方空白公文測試檔另依來源網站宣告使用，出處及檔案核對資訊見 [測試資料來源](tests/fixtures/README.md)。
