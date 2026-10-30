@@ -1,4 +1,5 @@
 # 開發用：以 UI Automation 操作 GUI 進行端到端轉換測試
+param([string]$Exe)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 $root = Split-Path -Parent $PSScriptRoot
@@ -7,7 +8,8 @@ New-Item -ItemType Directory $work | Out-Null
 Copy-Item (Join-Path $root 'tests\fixtures\*.pdf') $work
 $files = Get-ChildItem $work -Filter *.pdf | ForEach-Object FullName
 
-$p = Start-Process (Join-Path $root 'target\debug\pdfword.exe') -ArgumentList ($files | ForEach-Object { "`"$_`"" }) -PassThru
+if (-not $Exe) { $Exe = Join-Path $root 'target\debug\pdfword.exe' }
+$p = Start-Process $Exe -ArgumentList ($files | ForEach-Object { "`"$_`"" }) -PassThru
 try {
     Start-Sleep 3
     $p.Refresh()

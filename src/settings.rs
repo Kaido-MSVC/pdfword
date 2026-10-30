@@ -25,7 +25,7 @@ impl Default for Settings {
 }
 
 pub fn path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("pdfword").join("settings.json"))
+    std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("pdfword").join("settings.json"))
 }
 
 impl Settings {

@@ -1,0 +1,56 @@
+<!--
+  PDF 轉 Word 安裝程式（WiX Toolset 7）
+  由 scripts\build.ps1 建置：
+    wix build installer\pdfword.wxs -arch x64 -ext WixToolset.UI.wixext -culture zh-TW -acceptEula wix7
+              -d Version=x.y.z -d AppDir=<dist 內的程式資料夾> -o dist\pdfword-x.y.z-x64.msi
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="PDF 轉 Word"
+           Manufacturer="kaido-MSVC"
+           Version="$(Version)"
+           UpgradeCode="b8378673-ea26-49a6-aaa0-8058415bc7d6"
+           Scope="perMachine"
+           Language="1028"
+           Codepage="950">
+
+    <MajorUpgrade DowngradeErrorMessage="已安裝較新版本的 [ProductName]，安裝程式即將結束。" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon" SourceFile="$(sys.SOURCEFILEDIR)..\assets\icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)license.rtf" />
+
+    <Feature Id="Main" Title="PDF 轉 Word" AllowAbsent="no">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="PDF 轉 Word" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(AppDir)\**" />
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder">
+      <Shortcut Id="AppShortcut"
+                Name="PDF 轉 Word"
+                Description="PDF 批次轉換為可編輯的 Word 文件"
+                Target="[INSTALLFOLDER]pdfword.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AppIcon" />
+      <RegistryValue Root="HKCU" Key="Software\pdfword" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+  </Fragment>
+</Wix>

@@ -20,7 +20,7 @@ docx-rs 0.4.22 — MIT
 rayon 1.12.0 — MIT / Apache-2.0
 rfd 0.17.2 — MIT
 image 0.25 — MIT / Apache-2.0
-serde、serde_json、dirs — MIT / Apache-2.0
+serde、serde_json — MIT / Apache-2.0
 
 完整授權條文請見程式目錄下的 licenses 資料夾。";
 
