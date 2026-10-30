@@ -132,9 +132,14 @@ fn extract_page(page: &PdfPage) -> Result<(PageData, Vec<(DynamicImage, Rect)>),
 
     // 文字
     let text = page.text()?;
+    let mut pending_space = false;
     for c in text.chars().iter() {
         let Some(ch) = c.unicode_char() else { continue };
         if ch.is_control() || ch.is_whitespace() {
+            // PDF 內容本身的空白（非 PDFium 自動產生）要保留，中日韓文字間也一樣
+            if ch == ' ' || ch == '　' {
+                pending_space |= !c.is_generated().unwrap_or(true);
+            }
             continue;
         }
         let Ok(b) = c.loose_bounds() else { continue };
@@ -154,6 +159,7 @@ fn extract_page(page: &PdfPage) -> Result<(PageData, Vec<(DynamicImage, Rect)>),
             italic: c.font_is_italic() || name_is_italic(&font),
             font,
             color,
+            space_before: std::mem::take(&mut pending_space),
         });
     }
 
@@ -278,10 +284,12 @@ fn walk_object(
                     bbox,
                     baseline: bbox.cy() + 0.3 * size,
                     size,
-                    font: "Symbol".into(),
+                    // 不指定字型：Word 的 Symbol 字型沒有 U+2022
+                    font: String::new(),
                     bold: false,
                     italic: false,
                     color: obj.fill_color().map(|k| [k.red(), k.green(), k.blue()]).unwrap_or([0, 0, 0]),
+                    space_before: false,
                 });
                 return;
             }
@@ -305,6 +313,9 @@ fn walk_object(
                 data.rulings.push(Ruling::vertical(bbox.cx(), bbox.y0, bbox.y1));
             } else {
                 shapes.push(VectorShape { bbox, rect_only: true });
+                if let Ok(c) = obj.fill_color() {
+                    data.fills.push((bbox, [c.red(), c.green(), c.blue()]));
+                }
             }
         }
     }

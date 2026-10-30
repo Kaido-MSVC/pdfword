@@ -69,7 +69,10 @@ pub fn detect(shapes: &[VectorShape], glyphs: &[Glyph], rulings: &[Ruling], page
             let inside = glyphs.iter().filter(|g| r.contains_point(g.bbox.cx(), g.bbox.cy())).count();
             inside <= if *ro { MAX_GLYPHS_INSIDE_RECTS } else { MAX_GLYPHS_INSIDE }
         })
-        .map(|(r, _, _)| r)
+        // 外擴一點，避免切到邊緣的線條
+        .map(|(r, _, _)| {
+            Rect::new((r.x0 - 3.0).max(page.x0), (r.y0 - 3.0).max(page.y0), (r.x1 + 3.0).min(page.x1), (r.y1 + 3.0).min(page.y1))
+        })
         .collect()
 }
 
@@ -91,7 +94,7 @@ mod tests {
             .collect();
         let f = detect(&shapes, &[], &[], page());
         assert_eq!(f.len(), 1);
-        assert_eq!(f[0], Rect::new(100.0, 200.0, 275.0, 300.0));
+        assert_eq!(f[0], Rect::new(97.0, 197.0, 278.0, 303.0));
     }
 
     #[test]
@@ -105,7 +108,7 @@ mod tests {
         let axis = [Ruling::horizontal(300.0, 90.0, 340.0)];
         let f = detect(&shapes, &[], &axis, page());
         assert_eq!(f.len(), 1);
-        assert_eq!(f[0], Rect::new(90.0, 200.0, 340.0, 300.0));
+        assert_eq!(f[0], Rect::new(87.0, 197.0, 343.0, 303.0));
     }
 
     #[test]

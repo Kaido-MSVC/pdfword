@@ -59,6 +59,8 @@ pub struct Glyph {
     pub bold: bool,
     pub italic: bool,
     pub color: [u8; 3],
+    /// PDF 中此字元前有明確的空白字元
+    pub space_before: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +107,8 @@ pub struct PageData {
     pub glyphs: Vec<Glyph>,
     pub images: Vec<ImageItem>,
     pub rulings: Vec<Ruling>,
+    /// 非白色的填色矩形（表格網底）
+    pub fills: Vec<(Rect, [u8; 3])>,
 }
 
 // ---- 版面分析結果 ----
@@ -162,6 +166,8 @@ pub enum VMerge {
 pub struct Cell {
     pub col_span: usize,
     pub vmerge: VMerge,
+    pub shading: Option<[u8; 3]>,
+    pub valign_center: bool,
     pub paragraphs: Vec<Paragraph>,
 }
 

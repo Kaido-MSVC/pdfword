@@ -104,7 +104,7 @@ fn make_line(gs: &[&Glyph]) -> Line {
             let size = p.size.max(g.size);
             // 項目符號後一律依一般間距補空白
             let cjk = (is_cjk(p.ch) || is_cjk(g.ch)) && p.ch != '•';
-            space = if cjk { gap > 1.0 * size } else { gap > 0.15 * size };
+            space = g.space_before || if cjk { gap > 1.0 * size } else { gap > 0.15 * size };
         }
         match runs.last_mut() {
             Some(r) if same_style(r, g) => {
@@ -144,6 +144,7 @@ pub(crate) mod tests {
     pub fn glyphs_at(text: &str, x: f32, baseline: f32, size: f32) -> Vec<Glyph> {
         let mut out = Vec::new();
         let mut cx = x;
+        let mut space = false;
         for ch in text.chars() {
             let w = if is_cjk(ch) { size } else { size * 0.5 };
             if ch != ' ' {
@@ -156,7 +157,10 @@ pub(crate) mod tests {
                     bold: false,
                     italic: false,
                     color: [0, 0, 0],
+                    space_before: std::mem::take(&mut space),
                 });
+            } else {
+                space = true;
             }
             cx += if ch == ' ' { size * 0.3 } else { w };
         }
@@ -177,6 +181,13 @@ pub(crate) mod tests {
         let g = glyphs_at("繁體中文測試", 10.0, 100.0, 12.0);
         let refs: Vec<&Glyph> = g.iter().collect();
         assert_eq!(build_lines(&refs)[0].text(), "繁體中文測試");
+    }
+
+    #[test]
+    fn explicit_space_between_cjk_kept() {
+        let g = glyphs_at("一月 二月", 10.0, 100.0, 10.0);
+        let refs: Vec<&Glyph> = g.iter().collect();
+        assert_eq!(build_lines(&refs)[0].text(), "一月 二月");
     }
 
     #[test]

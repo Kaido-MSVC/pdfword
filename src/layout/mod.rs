@@ -52,12 +52,17 @@ pub fn analyze(page: &PageData, body_size: f32) -> PageLayout {
     let mut contents: Vec<Content> = Vec::new();
     let mut items: Vec<Item> = Vec::new();
     for l in lines::build_lines(&free) {
+        // 頁首/頁尾的頁碼在流式文件中沒有意義
+        let edge = l.bbox.y1 < page.height * 0.08 || l.bbox.y0 > page.height * 0.92;
+        if edge && is_page_number(&l.text()) {
+            continue;
+        }
         items.push(Item { bbox: l.bbox, kind: ItemKind::Text });
         contents.push(Content::Line(l));
     }
     for (grid, glyphs) in grids.iter().zip(in_table) {
         items.push(Item { bbox: grid.bbox, kind: ItemKind::Other });
-        contents.push(Content::Table(build_table(grid, &glyphs, body_size)));
+        contents.push(Content::Table(build_table(grid, &glyphs, &page.fills, body_size)));
     }
     for (i, img) in page.images.iter().enumerate() {
         items.push(Item { bbox: img.bbox, kind: ItemKind::Other });
@@ -92,7 +97,9 @@ pub fn analyze(page: &PageData, body_size: f32) -> PageLayout {
         let bottom = pending.last().unwrap().bbox.y1;
         let mut ps = blocks::paragraphs(pending, col, body_size);
         if let (Some(first), Some(b)) = (ps.first_mut(), *prev_bottom) {
-            first.space_before = (top - b - 0.25 * first.size).clamp(0.0, 72.0);
+            // 換欄時（新內容在上一段之上）用一般段距
+            first.space_before =
+                if top < b { 0.6 * first.size } else { (top - b - 0.25 * first.size).clamp(0.0, 72.0) };
         }
         blocks.extend(ps.into_iter().map(Block::Paragraph));
         *prev_bottom = Some(bottom);
@@ -125,7 +132,32 @@ pub fn analyze(page: &PageData, body_size: f32) -> PageLayout {
     PageLayout { width: page.width, height: page.height, content, blocks }
 }
 
-fn build_table(grid: &tables::TableGrid, glyphs: &[&Glyph], body_size: f32) -> Table {
+/// 「12」「- 12 -」「12 / 30」「第 12 頁」「Page 12 of 30」等頁碼樣式
+pub fn is_page_number(text: &str) -> bool {
+    let t: String = text.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_lowercase();
+    let t = t.trim_matches(|c| matches!(c, '-' | '–' | '—' | '[' | ']' | '(' | ')'));
+    let digits = |s: &str| !s.is_empty() && s.len() <= 4 && s.chars().all(|c| c.is_ascii_digit());
+    if digits(t) {
+        return true;
+    }
+    if let Some((a, b)) = t.split_once('/') {
+        return digits(a) && digits(b);
+    }
+    if let Some(rest) = t.strip_prefix('第') {
+        if let Some((n, tail)) = rest.split_once('頁') {
+            return digits(n) && (tail.is_empty() || tail.starts_with('共') || tail.starts_with('/'));
+        }
+    }
+    if let Some(rest) = t.strip_prefix("page") {
+        return match rest.split_once("of") {
+            Some((a, b)) => digits(a) && digits(b),
+            None => digits(rest),
+        };
+    }
+    false
+}
+
+fn build_table(grid: &tables::TableGrid, glyphs: &[&Glyph], fills: &[(Rect, [u8; 3])], body_size: f32) -> Table {
     let mut rows: Vec<Row> = (0..grid.rows())
         .map(|r| Row { height: grid.ys[r + 1] - grid.ys[r], cells: Vec::new() })
         .collect();
@@ -145,9 +177,21 @@ fn build_table(grid: &tables::TableGrid, glyphs: &[&Glyph], body_size: f32) -> T
             })
             .collect();
         let vmerge = if gc.row_span > 1 { VMerge::Restart } else { VMerge::None };
-        placed[gc.row].push((gc.col, Cell { col_span: gc.col_span, vmerge, paragraphs }));
+        // 網底：完整涵蓋儲存格的最小填色矩形
+        let shading = fills
+            .iter()
+            .filter(|(f, _)| f.x0 <= rect.x0 + 2.0 && f.y0 <= rect.y0 + 2.0 && f.x1 >= rect.x1 - 2.0 && f.y1 >= rect.y1 - 2.0)
+            .min_by(|a, b| a.0.area().total_cmp(&b.0.area()))
+            .map(|f| f.1);
+        // 文字明顯離開頂端且大致置中 → 垂直置中
+        let valign_center = match lines.iter().map(|l| l.bbox).reduce(|a, b| a.union(&b)) {
+            Some(tb) => tb.y0 - rect.y0 > 4.0 && (tb.cy() - rect.cy()).abs() < rect.height() * 0.15,
+            None => false,
+        };
+        placed[gc.row].push((gc.col, Cell { col_span: gc.col_span, vmerge, shading, valign_center, paragraphs }));
         for r in gc.row + 1..gc.row + gc.row_span {
-            placed[r].push((gc.col, Cell { col_span: gc.col_span, vmerge: VMerge::Continue, paragraphs: Vec::new() }));
+            let cont = Cell { col_span: gc.col_span, vmerge: VMerge::Continue, shading, valign_center, paragraphs: Vec::new() };
+            placed[r].push((gc.col, cont));
         }
     }
     for (r, mut cells) in placed.into_iter().enumerate() {
@@ -166,6 +210,16 @@ mod tests {
     use super::lines::tests::glyphs_at;
     use super::*;
     use crate::model::Ruling;
+
+    #[test]
+    fn page_number_patterns() {
+        for t in ["12", "- 3 -", "4 / 20", "第 5 頁", "第5頁共9頁", "Page 2 of 9", "page 7"] {
+            assert!(is_page_number(t), "{t}");
+        }
+        for t in ["第一章", "12 apples", "Pages", "12345"] {
+            assert!(!is_page_number(t), "{t}");
+        }
+    }
 
     #[test]
     fn page_with_text_and_table() {
