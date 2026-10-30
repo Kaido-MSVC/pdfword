@@ -27,7 +27,9 @@ pub fn convert_file(
         progress(0.7 * done as f32 / total.max(1) as f32)
     })?;
     let body = layout::body_size(&doc.pages);
-    let layouts: Vec<_> = doc.pages.par_iter().map(|p| layout::analyze(p, body)).collect();
+    let running = layout::running_lines(&doc.pages);
+    let mut layouts: Vec<_> = doc.pages.par_iter().map(|p| layout::analyze_with(p, body, &running)).collect();
+    layout::merge_across_pages(&mut layouts);
     if cancel.load(Ordering::Relaxed) {
         return Err(ExtractError::Cancelled);
     }

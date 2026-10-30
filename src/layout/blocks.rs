@@ -54,8 +54,13 @@ fn push_runs(dst: &mut Vec<Run>, src: &[Run]) {
 
 /// 把下一行接到段落：處理連字號斷字與中日韓不加空白
 fn append_line(runs: &mut Vec<Run>, line: &Line) {
+    append_runs(runs, &line.runs);
+}
+
+/// 把下一行（或下一頁開頭）的文字接到段落後面
+pub fn append_runs(runs: &mut Vec<Run>, next: &[Run]) {
     let prev_last = runs.iter().rev().find_map(|r| r.text.chars().last());
-    let next_first = line.first_char();
+    let next_first = next.iter().find_map(|r| r.text.chars().next());
     if let (Some(p), Some(n)) = (prev_last, next_first) {
         if p == '-' && n.is_lowercase() {
             if let Some(r) = runs.iter_mut().rev().find(|r| !r.text.is_empty()) {
@@ -67,7 +72,7 @@ fn append_line(runs: &mut Vec<Run>, line: &Line) {
             }
         }
     }
-    push_runs(runs, &line.runs);
+    push_runs(runs, next);
 }
 
 pub fn paragraphs(lines: &[Line], col: Rect, body_size: f32) -> Vec<Paragraph> {

@@ -6,10 +6,10 @@ pub mod figures;
 pub mod lines;
 pub mod tables;
 
-use crate::model::{Block, Cell, Glyph, PageData, PageLayout, Rect, Row, Table, VMerge};
+use crate::model::{Align, Block, Cell, Glyph, PageData, PageLayout, Rect, Row, Table, VMerge};
 use columns::{Item, ItemKind};
 use lines::Line;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// 全文件的本文字級：以字數加權的最常見字級
 pub fn body_size<'a>(pages: impl IntoIterator<Item = &'a PageData>) -> f32 {
@@ -34,7 +34,75 @@ enum Content {
     Image(usize),
 }
 
+/// 位於頁面上下邊緣（頁首/頁尾區）
+fn in_edge_zone(r: &Rect, page_height: f32) -> bool {
+    r.y1 < page_height * 0.08 || r.y0 > page_height * 0.92
+}
+
+/// 比對頁首頁尾用的鍵：數字一律視為相同（頁碼、日期會變）
+fn running_key(text: &str) -> String {
+    text.chars().filter(|c| !c.is_whitespace()).map(|c| if c.is_ascii_digit() { '#' } else { c }).collect()
+}
+
+/// 找出在多數頁面的頁首/頁尾重複出現的行（例如每頁都印的文件標題）
+pub fn running_lines(pages: &[PageData]) -> HashSet<String> {
+    if pages.len() < 2 {
+        return HashSet::new();
+    }
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for p in pages {
+        let edge: Vec<&Glyph> = p
+            .glyphs
+            .iter()
+            .filter(|g| g.bbox.cy() < p.height * 0.08 || g.bbox.cy() > p.height * 0.92)
+            .collect();
+        let keys: HashSet<String> = lines::build_lines(&edge)
+            .iter()
+            .filter(|l| in_edge_zone(&l.bbox, p.height))
+            .map(|l| running_key(&l.text()))
+            .filter(|k| !k.is_empty())
+            .collect();
+        for k in keys {
+            *counts.entry(k).or_default() += 1;
+        }
+    }
+    let need = (pages.len() + 1) / 2;
+    counts.into_iter().filter(|&(_, n)| n >= need.max(2)).map(|(k, _)| k).collect()
+}
+
+/// 段落跨頁時，把下一頁開頭的延續段落接回上一頁最後一段
+pub fn merge_across_pages(pages: &mut [PageLayout]) {
+    for i in 1..pages.len() {
+        let (before, after) = pages.split_at_mut(i);
+        let Some(Block::Paragraph(prev)) = before[i - 1].blocks.last_mut() else { continue };
+        let Some(Block::Paragraph(next)) = after[0].blocks.first() else { continue };
+        let ends_sentence = prev
+            .runs
+            .iter()
+            .rev()
+            .find_map(|r| r.text.trim_end().chars().last())
+            .is_none_or(|c| "。．.！!？?：:；;」』）)".contains(c));
+        let continues = prev.heading.is_none()
+            && next.heading.is_none()
+            && !ends_sentence
+            && (prev.size - next.size).abs() < 0.5
+            && next.indent_first <= 1.0
+            && matches!(prev.align, Align::Left | Align::Justify)
+            && matches!(next.align, Align::Left | Align::Justify);
+        if continues {
+            let Block::Paragraph(next) = after[0].blocks.remove(0) else { unreachable!() };
+            blocks::append_runs(&mut prev.runs, &next.runs);
+            prev.align = next.align;
+        }
+    }
+}
+
 pub fn analyze(page: &PageData, body_size: f32) -> PageLayout {
+    analyze_with(page, body_size, &HashSet::new())
+}
+
+/// `running`：要略過的頁首/頁尾（見 [`running_lines`]）
+pub fn analyze_with(page: &PageData, body_size: f32, running: &HashSet<String>) -> PageLayout {
     let page_rect = Rect::new(0.0, 0.0, page.width, page.height);
     let grids = tables::detect(&page.rulings, page_rect);
 
@@ -52,10 +120,12 @@ pub fn analyze(page: &PageData, body_size: f32) -> PageLayout {
     let mut contents: Vec<Content> = Vec::new();
     let mut items: Vec<Item> = Vec::new();
     for l in lines::build_lines(&free) {
-        // 頁首/頁尾的頁碼在流式文件中沒有意義
-        let edge = l.bbox.y1 < page.height * 0.08 || l.bbox.y0 > page.height * 0.92;
-        if edge && is_page_number(&l.text()) {
-            continue;
+        // 頁首/頁尾的頁碼與重複文字在流式文件中沒有意義
+        if in_edge_zone(&l.bbox, page.height) {
+            let text = l.text();
+            if is_page_number(&text) || running.contains(&running_key(&text)) {
+                continue;
+            }
         }
         items.push(Item { bbox: l.bbox, kind: ItemKind::Text });
         contents.push(Content::Line(l));
@@ -210,6 +280,39 @@ mod tests {
     use super::lines::tests::glyphs_at;
     use super::*;
     use crate::model::Ruling;
+
+    #[test]
+    fn running_header_detected_and_removed() {
+        let pages: Vec<PageData> = (1..=3)
+            .map(|n| {
+                let mut p = PageData { width: 600.0, height: 800.0, ..Default::default() };
+                p.glyphs.extend(glyphs_at("Annual Report 2026", 50.0, 30.0, 9.0));
+                p.glyphs.extend(glyphs_at(&format!("Page {n} of 3"), 50.0, 780.0, 9.0));
+                p.glyphs.extend(glyphs_at(&format!("Body text {n}."), 50.0, 300.0, 10.0));
+                p
+            })
+            .collect();
+        let running = running_lines(&pages);
+        assert!(running.contains("AnnualReport####"));
+        let l = analyze_with(&pages[1], 10.0, &running);
+        assert_eq!(l.blocks.len(), 1);
+    }
+
+    #[test]
+    fn paragraph_continues_on_next_page() {
+        let full = "x".repeat(80);
+        let mut a = PageData { width: 600.0, height: 800.0, ..Default::default() };
+        a.glyphs.extend(glyphs_at(&full, 50.0, 700.0, 10.0));
+        a.glyphs.extend(glyphs_at(&full, 50.0, 712.0, 10.0));
+        let mut b = PageData { width: 600.0, height: 800.0, ..Default::default() };
+        b.glyphs.extend(glyphs_at("end of sentence.", 50.0, 100.0, 10.0));
+        b.glyphs.extend(glyphs_at("New paragraph.", 50.0, 140.0, 10.0));
+        let mut layouts = vec![analyze(&a, 10.0), analyze(&b, 10.0)];
+        merge_across_pages(&mut layouts);
+        let Block::Paragraph(p) = &layouts[0].blocks[0] else { panic!() };
+        assert!(p.text().ends_with("x end of sentence."));
+        assert_eq!(layouts[1].blocks.len(), 1);
+    }
 
     #[test]
     fn page_number_patterns() {
