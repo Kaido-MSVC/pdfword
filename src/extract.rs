@@ -1,6 +1,7 @@
 //! PDFium → PageData。所有 PDFium 呼叫都集中在這裡。
 
 use crate::layout::figures;
+use crate::layout::lines::is_cjk;
 use crate::model::{Glyph, ImageItem, PageData, Rect, Ruling, VectorShape};
 use image::DynamicImage;
 use pdfium_render::prelude::*;
@@ -143,23 +144,36 @@ fn extract_page(page: &PdfPage) -> Result<(PageData, Vec<(DynamicImage, Rect)>),
             continue;
         }
         let Ok(b) = c.loose_bounds() else { continue };
-        let (_, oy) = c.origin().unwrap_or((b.left(), b.bottom()));
+        let (ox, oy) = c.origin().unwrap_or((b.left(), b.bottom()));
+        let size = c.scaled_font_size().value;
+        let mut bbox = Rect::new(b.left().value, flip(b.top().value), b.right().value, flip(b.bottom().value));
+        // 部分字型（如 DFKaiShu 內嵌子集）回報的字框比字級大數倍或偏離原點，改由原點與字級推算
+        if size > 0.5
+            && (bbox.width() > 1.3 * size || bbox.height() > 1.6 * size || (bbox.x0 - ox.value).abs() > 0.25 * size)
+        {
+            let adv = if is_cjk(ch) { size } else { bbox.width().min(0.6 * size) };
+            let base = flip(oy.value);
+            bbox = Rect::new(ox.value, base - 0.88 * size, ox.value + adv, base + 0.12 * size);
+        }
         let font = clean_font_name(&c.font_name());
         let weight_bold = matches!(
             c.font_weight(),
             Some(PdfFontWeight::Weight600 | PdfFontWeight::Weight700Bold | PdfFontWeight::Weight800 | PdfFontWeight::Weight900)
-        ) || matches!(c.font_weight(), Some(PdfFontWeight::Custom(v)) if v >= 600);
+        ) || matches!(c.font_weight(), Some(PdfFontWeight::Custom(v)) if v >= 600)
+            // 填滿再描邊是 Word 等軟體對沒有粗體字重的字型模擬粗體的方式
+            || matches!(c.render_mode(), Ok(PdfPageTextRenderMode::FilledThenStroked));
         let color = c.fill_color().map(|k| [k.red(), k.green(), k.blue()]).unwrap_or([0, 0, 0]);
         data.glyphs.push(Glyph {
             ch,
-            bbox: Rect::new(b.left().value, flip(b.top().value), b.right().value, flip(b.bottom().value)),
+            bbox,
             baseline: flip(oy.value),
-            size: c.scaled_font_size().value,
+            size,
             bold: weight_bold || c.font_is_bold_reenforced() || name_is_bold(&font),
             italic: c.font_is_italic() || name_is_italic(&font),
             font,
             color,
             space_before: std::mem::take(&mut pending_space),
+            underline: false,
         });
     }
 
@@ -290,6 +304,7 @@ fn walk_object(
                     italic: false,
                     color: obj.fill_color().map(|k| [k.red(), k.green(), k.blue()]).unwrap_or([0, 0, 0]),
                     space_before: false,
+                    underline: false,
                 });
                 return;
             }

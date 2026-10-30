@@ -47,7 +47,8 @@ scripts/              下載、建置、授權聲明、圖示與開發測試工�
 
 ## 開發工具
 
-- `cargo run --example dump -- <檔案.pdf>`：列出版面分析結果（`DUMP_LINES=1` 另列出行）
+- `cargo run --example dump -- <檔案.pdf>`：列出版面分析結果（`DUMP_LINES=1` 另列出行，`DUMP_RULINGS=1` 另列出框線）
+- `cargo run --example glyphs -- <檔案.pdf>`：列出第一頁每個字元的原始字框、原點、字型與繪製模式
 - `cargo run --example convert -- <in.pdf> <out.docx>`：命令列轉換
 - `scripts\word-check.ps1 <docx...>`：以 Word 開啟驗證並匯出 PDF
 - `scripts\make-fixtures.ps1`：以 Edge 由 `tests\fixtures\src\*.html` 產生測試 PDF

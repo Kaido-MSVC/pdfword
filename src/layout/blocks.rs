@@ -40,7 +40,7 @@ fn join_same_baseline(lines: &[Line]) -> Vec<Line> {
 
 fn same_style(a: &Run, b: &Run) -> bool {
     !a.tab && !b.tab && a.font == b.font && (a.size - b.size).abs() < 0.6 && a.bold == b.bold
-        && a.italic == b.italic && a.color == b.color
+        && a.italic == b.italic && a.underline == b.underline && a.color == b.color
 }
 
 fn push_runs(dst: &mut Vec<Run>, src: &[Run]) {
@@ -124,8 +124,15 @@ pub fn paragraphs(lines: &[Line], col: Rect, body_size: f32) -> Vec<Paragraph> {
             first.bbox.x0
         };
         let width = col.width().max(1.0);
+        // 單行中文且左緣剛好空出 1–4 個字寬：是首行縮排，不是置中
+        let indent_chars = (first.bbox.x0 - col.x0) / size;
+        let cjk_indent = g.len() == 1
+            && first.first_char().is_some_and(is_cjk)
+            && (1.0..=4.0).contains(&indent_chars.round())
+            && (indent_chars - indent_chars.round()).abs() < 0.12;
         let all_centered = g.iter().all(|l| (l.bbox.cx() - col.cx()).abs() < 0.04 * width + 2.0)
-            && first.bbox.x0 > col.x0 + 2.0 * size;
+            && first.bbox.x0 > col.x0 + 2.0 * size
+            && !cjk_indent;
         let right_aligned = g.iter().all(|l| (col.x1 - l.bbox.x1).abs() < 3.0) && left > col.x0 + 0.3 * width;
         let justified = g.len() >= 2 && g[..g.len() - 1].iter().all(|l| col.x1 - l.bbox.x1 < 1.0 * size);
         let align = if all_centered {

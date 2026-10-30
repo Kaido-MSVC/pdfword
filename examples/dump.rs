@@ -16,6 +16,11 @@ fn main() {
         if std::env::var("DUMP_LINES").is_ok() {
             debug_lines(p);
         }
+        if std::env::var("DUMP_RULINGS").is_ok() {
+            for r in &p.rulings {
+                println!("  線 ({:.1},{:.1})-({:.1},{:.1})", r.x0, r.y0, r.x1, r.y1);
+            }
+        }
         let l = pdfword::layout::analyze(p, body);
         for b in &l.blocks {
             match b {

@@ -5,6 +5,7 @@ pub mod columns;
 pub mod figures;
 pub mod lines;
 pub mod tables;
+pub mod underlines;
 
 use crate::model::{Align, Block, Cell, Glyph, PageData, PageLayout, Rect, Row, Table, VMerge};
 use columns::{Item, ItemKind};
@@ -116,6 +117,14 @@ pub fn analyze_with(page: &PageData, body_size: f32, running: &HashSet<String>) 
             None => free.push(g),
         }
     }
+    let loose_rulings: Vec<_> = page
+        .rulings
+        .iter()
+        .filter(|r| !grids.iter().any(|t| t.bbox.intersects(&Rect::new(r.x0, r.y0, r.x1, r.y1), 1.0)))
+        .copied()
+        .collect();
+    let underlined = underlines::apply(&free, &loose_rulings);
+    let free: Vec<&Glyph> = underlined.iter().collect();
 
     let mut contents: Vec<Content> = Vec::new();
     let mut items: Vec<Item> = Vec::new();

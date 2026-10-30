@@ -61,6 +61,8 @@ pub struct Glyph {
     pub color: [u8; 3],
     /// PDF 中此字元前有明確的空白字元
     pub space_before: bool,
+    /// 字元下方有底線（填空欄位的底線以加底線的全形空白表示）
+    pub underline: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -128,6 +130,7 @@ pub struct Run {
     pub size: f32,
     pub bold: bool,
     pub italic: bool,
+    pub underline: bool,
     pub color: [u8; 3],
     /// 此 Run 代表一個 Tab（text 為空）
     pub tab: bool,

@@ -160,6 +160,9 @@ fn run(r: &model::Run) -> Run {
     if r.italic {
         x = x.italic();
     }
+    if r.underline {
+        x = x.underline("single");
+    }
     if r.color != [0, 0, 0] {
         x = x.color(format!("{:02X}{:02X}{:02X}", r.color[0], r.color[1], r.color[2]));
     }

@@ -38,7 +38,7 @@ pub fn build_lines(glyphs: &[&Glyph]) -> Vec<Line> {
     let mut gs: Vec<&Glyph> = glyphs
         .iter()
         .copied()
-        .filter(|g| !g.ch.is_whitespace() && !g.ch.is_control() && g.size > 0.5)
+        .filter(|g| (g.underline || !g.ch.is_whitespace()) && !g.ch.is_control() && g.size > 0.5)
         .collect();
     if gs.is_empty() {
         return Vec::new();
@@ -86,6 +86,7 @@ fn same_style(r: &Run, g: &Glyph) -> bool {
         && (r.size - g.size).abs() < 0.6
         && r.bold == g.bold
         && r.italic == g.italic
+        && r.underline == g.underline
         && r.color == g.color
 }
 
@@ -104,7 +105,9 @@ fn make_line(gs: &[&Glyph]) -> Line {
             let size = p.size.max(g.size);
             // 項目符號後一律依一般間距補空白
             let cjk = (is_cjk(p.ch) || is_cjk(g.ch)) && p.ch != '•';
-            space = g.space_before || if cjk { gap > 1.0 * size } else { gap > 0.15 * size };
+            // 補上的底線空白本身就是間距，其後不再加空白
+            space = !p.underline
+                && (g.space_before || if cjk { gap > 1.0 * size } else { gap > 0.15 * size });
         }
         match runs.last_mut() {
             Some(r) if same_style(r, g) => {
@@ -125,6 +128,7 @@ fn make_line(gs: &[&Glyph]) -> Line {
                     size: g.size,
                     bold: g.bold,
                     italic: g.italic,
+                    underline: g.underline,
                     color: g.color,
                     tab: false,
                 });
@@ -158,6 +162,7 @@ pub(crate) mod tests {
                     italic: false,
                     color: [0, 0, 0],
                     space_before: std::mem::take(&mut space),
+                    underline: false,
                 });
             } else {
                 space = true;
