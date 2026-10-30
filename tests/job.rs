@@ -1,20 +1,17 @@
 //! 批次轉換整合測試（需要 vendor/pdfium/pdfium.dll，先執行 scripts/fetch-pdfium.ps1）
 
+mod common;
+
+use common::root;
 use pdfword::job::{self, Conflict, Event, Status};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-fn root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
-
-fn setup() -> Option<PathBuf> {
-    let dll = root().join("vendor/pdfium");
-    if !dll.join("pdfium.dll").exists() {
-        eprintln!("略過：找不到 pdfium.dll");
+/// 初始化 PDFium 並建立暫存輸出資料夾；`test` 為測試名稱
+fn setup(test: &str) -> Option<PathBuf> {
+    if !common::init_pdfium(test) {
         return None;
     }
-    pdfword::extract::init(&dll).unwrap();
     let dir = std::env::temp_dir().join(format!("pdfword-test-{}-{}", std::process::id(), rand_suffix()));
     std::fs::create_dir_all(&dir).unwrap();
     Some(dir)
@@ -54,7 +51,7 @@ fn leftovers(dir: &Path) -> Vec<String> {
 
 #[test]
 fn batch_converts_and_reports_failures() {
-    let Some(out) = setup() else { return };
+    let Some(out) = setup("batch_converts_and_reports_failures") else { return };
     let fx = root().join("tests/fixtures");
     let bad = out.join("損毀.pdf");
     std::fs::write(&bad, b"%PDF-1.7 not really a pdf").unwrap();
@@ -85,7 +82,7 @@ fn batch_converts_and_reports_failures() {
 
 #[test]
 fn cancel_leaves_no_partial_files() {
-    let Some(out) = setup() else { return };
+    let Some(out) = setup("cancel_leaves_no_partial_files") else { return };
     let fx = root().join("tests/fixtures");
     let inputs: Vec<PathBuf> = (0..8).map(|_| fx.join("columns.pdf")).collect();
     let st = run(inputs, &out, true);
