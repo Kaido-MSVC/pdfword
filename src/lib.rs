@@ -6,4 +6,5 @@ pub mod fonts;
 pub mod job;
 pub mod layout;
 pub mod model;
+pub mod settings;
 pub mod writer;

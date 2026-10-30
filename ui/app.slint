@@ -1,15 +1,274 @@
-import { Button, VerticalBox } from "std-widgets.slint";
+import { Button, ListView, ProgressIndicator, ComboBox, SpinBox, LineEdit, AboutSlint, Palette, ScrollView, HorizontalBox, VerticalBox } from "std-widgets.slint";
+
+// state：0 待轉換、1 轉換中、2 完成、3 失敗、4 略過、5 已取消
+export struct FileRow {
+    name: string,
+    folder: string,
+    status: string,
+    progress: float,
+    state: int,
+}
+
+component StatusText inherits Text {
+    in property <int> state;
+    property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+    color: state == 2 ? (dark ? #7bd88f : #1b7f3b)
+         : state == 3 ? (dark ? #ff8a80 : #c62828)
+         : state == 1 ? Palette.accent-background
+         : Palette.foreground;
+    overflow: elide;
+    vertical-alignment: center;
+}
+
+component FileItem inherits Rectangle {
+    in property <FileRow> item;
+    in property <bool> selected;
+    callback clicked();
+    callback double-clicked();
+
+    height: 46px;
+    background: selected ? Palette.selection-background.transparentize(0.6) : touch.has-hover ? Palette.alternate-background : transparent;
+    border-radius: 4px;
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+        double-clicked => { root.double-clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text { text: item.name; font-weight: 600; overflow: elide; color: Palette.foreground; }
+            Text { text: item.folder; font-size: 11px; overflow: elide; color: Palette.foreground.transparentize(0.4); }
+        }
+        VerticalLayout {
+            alignment: center;
+            width: 220px;
+            spacing: 3px;
+            StatusText { text: item.status; state: item.state; }
+            ProgressIndicator {
+                height: 6px;
+                progress: item.progress;
+                visible: item.state == 1 || item.state == 2;
+            }
+        }
+    }
+}
 
 export component AppWindow inherits Window {
     title: "PDF 轉 Word";
+    icon: @image-url("../assets/icon.png");
     default-font-family: "Microsoft JhengHei UI";
-    preferred-width: 720px;
-    preferred-height: 480px;
+    min-width: 640px;
+    min-height: 460px;
+    preferred-width: 820px;
+    preferred-height: 600px;
 
-    in property <string> status: "就緒";
+    in-out property <[FileRow]> files: [];
+    in-out property <int> selected-index: -1;
+    in-out property <string> output-dir: "";
+    in-out property <int> conflict-mode: 0;
+    in-out property <int> threads: 4;
+    in property <int> max-threads: 8;
+    in-out property <int> theme: 0;
+    in property <bool> running: false;
+    in property <bool> ready: true;
+    in property <float> total-progress: 0;
+    in property <string> status: "將 PDF 檔案或資料夾拖放到視窗中，或按「加入檔案」。";
+    in property <bool> drag-hover: false;
+    in property <string> version: "";
+    in property <string> licenses: "";
+    in property <bool> can-open-output: false;
+
+    callback add-files();
+    callback add-folder();
+    callback remove-selected();
+    callback clear-list();
+    callback choose-output();
+    callback reset-output();
+    callback start();
+    callback cancel();
+    callback open-output();
+    callback open-file(int);
+    callback settings-changed();
+    callback quit();
+
+    public function apply-theme() {
+        Palette.color-scheme = theme == 1 ? ColorScheme.light : theme == 2 ? ColorScheme.dark : ColorScheme.unknown;
+    }
+
+    init => { apply-theme(); }
+
+    MenuBar {
+        Menu {
+            title: "檔案";
+            MenuItem { title: "加入檔案…"; enabled: !running; activated => { add-files(); } }
+            MenuItem { title: "加入資料夾…"; enabled: !running; activated => { add-folder(); } }
+            MenuItem { title: "清除清單"; enabled: !running; activated => { clear-list(); } }
+            MenuSeparator { }
+            MenuItem { title: "結束"; activated => { quit(); } }
+        }
+        Menu {
+            title: "檢視";
+            MenuItem { title: (theme == 0 ? "✓ " : "　 ") + "跟隨系統"; activated => { theme = 0; apply-theme(); settings-changed(); } }
+            MenuItem { title: (theme == 1 ? "✓ " : "　 ") + "淺色模式"; activated => { theme = 1; apply-theme(); settings-changed(); } }
+            MenuItem { title: (theme == 2 ? "✓ " : "　 ") + "深色模式"; activated => { theme = 2; apply-theme(); settings-changed(); } }
+        }
+        Menu {
+            title: "說明";
+            MenuItem { title: "關於 PDF 轉 Word"; activated => { about.show(); } }
+        }
+    }
+
+    background: Palette.background;
 
     VerticalBox {
-        Text { text: "PDF 轉 Word"; font-size: 20px; }
-        Text { text: root.status; }
+        HorizontalLayout {
+            spacing: 8px;
+            Button { text: "加入檔案"; enabled: !running; clicked => { add-files(); } }
+            Button { text: "加入資料夾"; enabled: !running; clicked => { add-folder(); } }
+            Button { text: "移除"; enabled: !running && selected-index >= 0; clicked => { remove-selected(); } }
+            Button { text: "清除清單"; enabled: !running && files.length > 0; clicked => { clear-list(); } }
+            Rectangle { horizontal-stretch: 1; }
+            Text {
+                vertical-alignment: center;
+                text: files.length == 0 ? "" : "共 " + files.length + " 個檔案";
+                color: Palette.foreground.transparentize(0.3);
+            }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            border-width: drag-hover ? 2px : 1px;
+            border-color: drag-hover ? Palette.accent-background : Palette.border;
+            border-radius: 6px;
+            background: drag-hover ? Palette.accent-background.transparentize(0.9) : Palette.alternate-background.transparentize(0.5);
+            clip: true;
+
+            if files.length == 0: VerticalLayout {
+                alignment: center;
+                spacing: 6px;
+                Text { text: "⬇"; font-size: 34px; horizontal-alignment: center; color: Palette.foreground.transparentize(0.6); }
+                Text { text: "將 PDF 檔案或資料夾拖放到這裡"; font-size: 16px; horizontal-alignment: center; color: Palette.foreground.transparentize(0.3); }
+                Text { text: "支援批次轉換，輸出可編輯的 Word（DOCX）檔"; horizontal-alignment: center; color: Palette.foreground.transparentize(0.5); }
+            }
+
+            ListView {
+                visible: files.length > 0;
+                for file[i] in files: FileItem {
+                    item: file;
+                    selected: i == selected-index;
+                    clicked => { selected-index = i; }
+                    double-clicked => { open-file(i); }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: "輸出資料夾："; vertical-alignment: center; }
+            LineEdit {
+                horizontal-stretch: 1;
+                read-only: true;
+                text: output-dir == "" ? "與來源檔案相同的資料夾" : output-dir;
+            }
+            Button { text: "選擇…"; enabled: !running; clicked => { choose-output(); } }
+            Button { text: "同來源"; enabled: !running && output-dir != ""; clicked => { reset-output(); } }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: "同名檔案："; vertical-alignment: center; }
+            ComboBox {
+                width: 150px;
+                enabled: !running;
+                model: ["自動加序號", "覆寫", "略過"];
+                current-index <=> conflict-mode;
+                selected => { settings-changed(); }
+            }
+            Rectangle { width: 16px; }
+            Text { text: "同時轉換："; vertical-alignment: center; }
+            SpinBox {
+                width: 110px;
+                enabled: !running;
+                minimum: 1;
+                maximum: max-threads;
+                value <=> threads;
+                edited => { settings-changed(); }
+            }
+            Text { text: "個檔案"; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        ProgressIndicator { height: 8px; progress: total-progress; }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                horizontal-stretch: 1;
+                text: status;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Button {
+                text: "開啟輸出資料夾";
+                enabled: can-open-output && !running;
+                clicked => { open-output(); }
+            }
+            if !running: Button {
+                text: "開始轉換";
+                primary: true;
+                enabled: ready && files.length > 0;
+                clicked => { start(); }
+            }
+            if running: Button {
+                text: "取消";
+                clicked => { cancel(); }
+            }
+        }
+    }
+
+    about := PopupWindow {
+        close-policy: close-on-click-outside;
+        x: (root.width - 520px) / 2;
+        y: max(0px, (root.height - 500px) / 2);
+        width: 520px;
+        height: min(500px, root.height);
+
+        Rectangle {
+            background: Palette.background;
+            border-color: Palette.border;
+            border-width: 1px;
+            border-radius: 8px;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000060;
+
+            VerticalBox {
+                Text { text: "PDF 轉 Word"; font-size: 20px; font-weight: 700; }
+                Text { text: "版本 " + version + "　·　PDF 批次轉換為可編輯的 DOCX"; color: Palette.foreground.transparentize(0.3); }
+                AboutSlint { height: 130px; }
+                Text { text: "第三方元件與授權："; font-weight: 600; }
+                ScrollView {
+                    vertical-stretch: 1;
+                    Text {
+                        x: 4px;
+                        width: parent.visible-width - 12px;
+                        height: self.preferred-height;
+                        vertical-alignment: top;
+                        text: licenses;
+                        wrap: word-wrap;
+                        font-size: 12px;
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    Button { text: "關閉"; clicked => { about.close(); } }
+                }
+            }
+        }
     }
 }
