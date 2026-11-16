@@ -1,5 +1,6 @@
 //! PDFium → PageData。所有 PDFium 呼叫都集中在這裡。
 
+use crate::imgxform::{self, Placement};
 use crate::layout::figures;
 use crate::layout::lines::is_cjk;
 use crate::model::{Glyph, ImageItem, PageData, Rect, Ruling, VectorShape};
@@ -90,11 +91,13 @@ pub fn extract_document(
         }
         let (mut data, raw_images) = {
             let _g = GATE.lock().unwrap_or_else(|e| e.into_inner());
-            let page = doc.pages().get(i as PdfPageIndex)?;
-            extract_page(&page)?
+            let mut page = doc.pages().get(i as PdfPageIndex)?;
+            // 取圖片像素時會暫時改物件矩陣；不要讓 pdfium-render 重新產生頁面內容串流
+            page.set_content_regeneration_strategy(PdfPageContentRegenerationStrategy::Manual);
+            extract_page(&page, &doc)?
         };
         // PNG 編碼在鎖外進行
-        data.images = raw_images.iter().filter_map(|(img, r)| to_image_item(img, *r)).collect();
+        data.images = raw_images.into_iter().filter_map(to_image_item).collect();
         pages.push(data);
         on_page(i + 1, total);
     }
@@ -124,8 +127,15 @@ fn name_is_italic(n: &str) -> bool {
     l.contains("italic") || l.contains("oblique")
 }
 
+/// 尚未編碼的圖片；`placement` 為 None 表示像素已是頁面上看到的樣子（例如向量圖點陣化結果）
+struct RawImage {
+    img: DynamicImage,
+    bbox: Rect,
+    placement: Option<Placement>,
+}
+
 /// 回傳頁面資料與尚未編碼的圖片（images 欄位留空，由呼叫端在鎖外編碼）
-fn extract_page(page: &PdfPage) -> Result<(PageData, Vec<(DynamicImage, Rect)>), ExtractError> {
+fn extract_page(page: &PdfPage, doc: &PdfDocument) -> Result<(PageData, Vec<RawImage>), ExtractError> {
     let w = page.width().value;
     let h = page.height().value;
     let flip = |y: f32| h - y;
@@ -179,9 +189,9 @@ fn extract_page(page: &PdfPage) -> Result<(PageData, Vec<(DynamicImage, Rect)>),
 
     // 圖片、框線、向量圖
     let mut shapes = Vec::new();
-    let mut images: Vec<(DynamicImage, Rect)> = Vec::new();
-    for obj in page.objects().iter() {
-        walk_object(&obj, h, &[], &mut data, &mut images, &mut shapes);
+    let mut images: Vec<RawImage> = Vec::new();
+    for mut obj in page.objects().iter() {
+        walk_object(&mut obj, doc, h, &[], &mut data, &mut images, &mut shapes);
     }
 
     // 圖表等向量圖：整區點陣化，區內文字與圖片併入圖中
@@ -193,7 +203,7 @@ fn extract_page(page: &PdfPage) -> Result<(PageData, Vec<(DynamicImage, Rect)>),
             let inside = |rx: f32, ry: f32| regions.iter().any(|r| r.contains_point(rx, ry));
             data.glyphs.retain(|g| !inside(g.bbox.cx(), g.bbox.cy()));
             data.rulings.retain(|l| !inside((l.x0 + l.x1) / 2.0, (l.y0 + l.y1) / 2.0));
-            images.retain(|(_, r)| !inside(r.cx(), r.cy()));
+            images.retain(|i| !inside(i.bbox.cx(), i.bbox.cy()));
             let sx = img.width() as f32 / w;
             let sy = img.height() as f32 / h;
             for r in &regions {
@@ -201,7 +211,7 @@ fn extract_page(page: &PdfPage) -> Result<(PageData, Vec<(DynamicImage, Rect)>),
                 let cw = ((r.width() * sx) as u32).min(img.width().saturating_sub(x));
                 let ch = ((r.height() * sy) as u32).min(img.height().saturating_sub(y));
                 if cw > 0 && ch > 0 {
-                    images.push((img.crop_imm(x, y, cw, ch), *r));
+                    images.push(RawImage { img: img.crop_imm(x, y, cw, ch), bbox: *r, placement: None });
                 }
             }
         }
@@ -216,19 +226,20 @@ fn apply_chain(chain: &[PdfMatrix], x: PdfPoints, y: PdfPoints) -> (PdfPoints, P
 
 /// `parents`：外層表單 XObject 的矩陣（由內而外）；表單內物件的座標需再經這些矩陣轉到頁面
 fn walk_object(
-    obj: &PdfPageObject,
+    obj: &mut PdfPageObject,
+    doc: &PdfDocument,
     h: f32,
     parents: &[PdfMatrix],
     data: &mut PageData,
-    images: &mut Vec<(DynamicImage, Rect)>,
+    images: &mut Vec<RawImage>,
     shapes: &mut Vec<VectorShape>,
 ) {
     if let Some(form) = obj.as_x_object_form_object() {
         if parents.len() < 8 {
             let mut chain = vec![form.matrix().unwrap_or(PdfMatrix::IDENTITY)];
             chain.extend_from_slice(parents);
-            for child in form.iter() {
-                walk_object(&child, h, &chain, data, images, shapes);
+            for mut child in form.iter() {
+                walk_object(&mut child, doc, h, &chain, data, images, shapes);
             }
         }
         return;
@@ -240,12 +251,21 @@ fn walk_object(
     }
     let bbox = Rect::new(r.left().value, h - r.top().value, r.right().value, h - r.bottom().value);
 
-    if let Some(img) = obj.as_image_object() {
+    if let Some(img) = obj.as_image_object_mut() {
         if bbox.width() < 4.0 || bbox.height() < 4.0 {
             return;
         }
-        if let Ok(di) = img.get_raw_image() {
-            images.push((di, bbox));
+        // 圖片空間的單位正方形經物件矩陣與外層表單矩陣映到頁面；PDF 圖片第 0 列在 (0, 1)
+        let mut chain = vec![img.matrix().unwrap_or(PdfMatrix::IDENTITY)];
+        chain.extend_from_slice(parents);
+        let pt = |x: f32, y: f32| {
+            let (px, py) = apply_chain(&chain, PdfPoints::new(x), PdfPoints::new(y));
+            (px.value, h - py.value)
+        };
+        let (o, right, down) = (pt(0.0, 1.0), pt(1.0, 1.0), pt(0.0, 0.0));
+        let placement = Placement { origin: o, cx: (right.0 - o.0, right.1 - o.1), ry: (down.0 - o.0, down.1 - o.1) };
+        if let Some(di) = upright_pixels(img, doc) {
+            images.push(RawImage { img: di, bbox, placement: Some(placement) });
         }
         return;
     }
@@ -336,14 +356,44 @@ fn walk_object(
     }
 }
 
-fn to_image_item(img: &DynamicImage, bbox: Rect) -> Option<ImageItem> {
+/// 取得套用 SMask／Mask／色鍵遮罩後的直立像素（含 alpha）。
+///
+/// pdfium-render 的 `get_raw_image` 不套用遮罩；`get_processed_image` 雖套用遮罩，
+/// 但會把矩陣中負的 a／d 翻正（丟掉鏡射），且旋轉時輸出的是外框大小的點陣圖。
+/// 因此暫時把物件矩陣換成直立的「寬 × 高」，取得遮罩後的直立像素，再還原矩陣；
+/// 旋轉與鏡射改由 imgxform 依原矩陣處理。尺寸在 PDFium 解碼時就限制在 MAX_IMAGE_PX 內。
+fn upright_pixels(img: &mut PdfPageImageObject, doc: &PdfDocument) -> Option<DynamicImage> {
+    let processed = (|| {
+        let (w, h) = (img.width().ok()?, img.height().ok()?);
+        if w <= 0 || h <= 0 {
+            return None;
+        }
+        let s = (MAX_IMAGE_PX as f32 / w.max(h) as f32).min(1.0);
+        let (tw, th) = (((w as f32 * s).round() as i32).max(1), ((h as f32 * s).round() as i32).max(1));
+        let original = img.matrix().ok()?;
+        img.reset_matrix(PdfMatrix::new(tw as f32, 0.0, 0.0, th as f32, 0.0, 0.0)).ok()?;
+        let r = img.get_processed_image_with_size(doc, tw, th);
+        // 一定要還原，否則後續整頁點陣化（向量圖區域）會畫錯
+        let _ = img.reset_matrix(original);
+        r.ok()
+    })();
+    // 退回原始像素（無遮罩）總比整張圖遺失好
+    processed.or_else(|| img.get_raw_image().ok())
+}
+
+fn to_image_item(raw: RawImage) -> Option<ImageItem> {
+    let RawImage { img, bbox, placement } = raw;
     let img = if img.width().max(img.height()) > MAX_IMAGE_PX {
         img.resize(MAX_IMAGE_PX, MAX_IMAGE_PX, image::imageops::FilterType::Triangle)
     } else {
-        img.clone()
+        img
     };
     // 統一轉成 RGBA8 再編碼 PNG（docx-rs 只接受 PNG）
-    let rgba = DynamicImage::ImageRgba8(img.to_rgba8());
+    let mut rgba = img.to_rgba8();
+    if let Some(p) = placement {
+        rgba = imgxform::apply(rgba, &p, (bbox.x0, bbox.y0, bbox.x1, bbox.y1), MAX_IMAGE_PX)?;
+    }
+    let rgba = DynamicImage::ImageRgba8(rgba);
     let mut buf = Vec::new();
     rgba.write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png).ok()?;
     Some(ImageItem { bbox, png: buf, px_w: rgba.width(), px_h: rgba.height() })
