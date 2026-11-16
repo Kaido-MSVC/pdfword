@@ -15,7 +15,7 @@ Windows x64 桌面程式：把 PDF 批次轉換成可編輯的 Word（DOCX），
 | 項目 | 採用 | 授權 |
 |---|---|---|
 | GUI | Slint 1.18.1（winit + femtovg/software 渲染） | Slint Royalty-free 2.0（需顯示 AboutSlint，已放在「說明 → 關於」） |
-| PDF 解析 | PDFium chromium/7881（bblanchon/pdfium-binaries，無 V8/XFA）+ pdfium-render 0.9.4 | BSD-3/Apache-2.0；MIT/Apache-2.0 |
+| PDF 解析 | PDFium chromium/7881（bblanchon/pdfium-binaries，無 V8/XFA）+ pdfium-render 0.9.5 | BSD-3/Apache-2.0；MIT/Apache-2.0 |
 | DOCX | docx-rs 0.4.22 | MIT |
 | 平行處理 | rayon 1.12.0 | MIT/Apache-2.0 |
 | 檔案對話框 | rfd 0.17.2 | MIT |

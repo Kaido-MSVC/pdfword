@@ -19,7 +19,7 @@ Slint 1.18.1 — Slint Royalty-free License 2.0
 PDFium（chromium/7881，bblanchon/pdfium-binaries）— BSD-3-Clause / Apache-2.0；\
 內含 FreeType（FTL）、libjpeg-turbo（IJG/BSD）、OpenJPEG（BSD-2）、lcms2（MIT）、zlib、libpng、\
 libtiff、Abseil（Apache-2.0）、ICU（Unicode）、AGG、fast_float、simdutf、LLVM libc 等
-pdfium-render 0.9.4 — MIT / Apache-2.0
+pdfium-render 0.9.5 — MIT / Apache-2.0
 docx-rs 0.4.22 — MIT
 rayon 1.12.0 — MIT / Apache-2.0
 rfd 0.17.2 — MIT
