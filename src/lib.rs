@@ -8,5 +8,6 @@ pub mod job;
 pub mod layout;
 pub mod model;
 pub mod output;
+pub mod scan;
 pub mod settings;
 pub mod writer;
