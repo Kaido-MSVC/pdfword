@@ -30,7 +30,10 @@ try {
         throw "SHA-256 不符：預期 $Sha256，實際 $Actual"
     }
 
-    tar -xzf $Tgz -C $Tmp
+    # 用 Windows 內建的 bsdtar；從 Git Bash 執行時 PATH 會先找到 GNU tar，它會把 C: 當成遠端主機
+    $Tar = 'C:\Windows\System32\tar.exe'
+    if (-not (Test-Path $Tar)) { throw "找不到 $Tar（需要 Windows 10 1803 以上內建的 tar）" }
+    & $Tar -xzf $Tgz -C $Tmp
     if ($LASTEXITCODE -ne 0) { throw "解壓縮失敗" }
 
     New-Item -ItemType Directory -Force -Path (Join-Path $Dest 'licenses') | Out-Null
