@@ -108,7 +108,7 @@ pub fn extract_document(
     Ok(DocInfo { pages })
 }
 
-/// 子集字型名稱去除 `ABCDEF+` 前綴
+/// 子集字型名稱去除 `ABCDEF+` 字首
 pub fn clean_font_name(name: &str) -> String {
     let n = match name.split_once('+') {
         Some((p, rest)) if p.len() == 6 && p.chars().all(|c| c.is_ascii_uppercase()) => rest,
