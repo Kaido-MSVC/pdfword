@@ -18,7 +18,7 @@ Windows x64 桌面程式：把 PDF 批次轉換成可編輯的 Word（DOCX），
 | PDF 解析 | PDFium chromium/8125（bblanchon/pdfium-binaries，無 V8/XFA）+ pdfium-render 0.9.5 | BSD-3/Apache-2.0；MIT/Apache-2.0 |
 | DOCX | docx-rs 0.4.22 | MIT |
 | 平行處理 | rayon 1.12.0 | MIT/Apache-2.0 |
-| 檔案對話框 | rfd 0.18.0 | MIT |
+| 檔案對話方塊 | rfd 0.18.0 | MIT |
 | 連結器 | LLVM lld-link 23（`.cargo/config.toml`），靜態 CRT | 建置工具，不散布 |
 | 安裝程式 | WiX Toolset 7 + WixToolset.UI.wixext | 建置工具；需接受 OSMF EULA（`-acceptEula wix7`） |
 
