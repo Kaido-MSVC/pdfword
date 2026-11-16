@@ -1,13 +1,13 @@
 # 下載固定版本的 PDFium（bblanchon/pdfium-binaries）到 vendor\pdfium，並驗證 SHA-256
-# 版本需與 pdfium-render 的 pdfium_7881 API 一致
+# 版本需與 pdfium-render 的 pdfium_8125 API 一致（pdfium-render 0.9.5 支援的最新版；8152 尚無對應 feature）
 param(
     [switch]$Force
 )
 $ErrorActionPreference = 'Stop'
 
-$Tag     = 'chromium/7881'
+$Tag     = 'chromium/8125'
 $Asset   = 'pdfium-win-x64.tgz'
-$Sha256  = '73cc0de638ac2095e7445bf56a38200a5b7c7ca0e9f4ba144598f2457377ac08'
+$Sha256  = '9a964261760cff52570aabf038ab346d3a5034dd8b30d0d5fe8861235d356b8b'
 $Root    = Split-Path -Parent $PSScriptRoot
 $Dest    = Join-Path $Root 'vendor\pdfium'
 $Dll     = Join-Path $Dest 'pdfium.dll'

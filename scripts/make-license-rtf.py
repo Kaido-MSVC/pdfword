@@ -8,7 +8,7 @@ TEXT = """PDF 轉 Word
 本程式使用下列第三方元件，各依其授權條款使用：
 
 • Slint 1.18.1 — Slint Royalty-free License 2.0（程式「說明 → 關於」顯示 AboutSlint）
-• PDFium（chromium/7881）— BSD-3-Clause / Apache-2.0，內含 FreeType（FTL）、libjpeg-turbo、OpenJPEG、lcms2、zlib、libpng、ICU 等寬鬆授權元件
+• PDFium（chromium/8125）— BSD-3-Clause / Apache-2.0，內含 FreeType（FTL）、libjpeg-turbo、OpenJPEG、lcms2、zlib、libpng、ICU、HarfBuzz 等寬鬆授權元件
 • pdfium-render、docx-rs、rayon、rfd、image、serde 等 Rust 套件 — MIT / Apache-2.0 等寬鬆授權
 
 所有第三方授權條文的完整內容，安裝後位於程式資料夾的 licenses 子資料夾。"""
