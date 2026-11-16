@@ -40,6 +40,8 @@ struct App {
     quit_when_done: RefCell<bool>,
     /// 進行中的資料夾掃描（取消旗標）
     scan: RefCell<Option<Arc<AtomicBool>>>,
+    /// 最近一筆實際寫出的輸出檔（開啟輸出資料夾用）
+    last_output: RefCell<Option<PathBuf>>,
 }
 
 thread_local! {
@@ -155,6 +157,7 @@ impl App {
         self.rows.set_vec(Vec::new());
         self.paths.borrow_mut().clear();
         self.outputs.borrow_mut().clear();
+        self.last_output.replace(None);
         let ui = self.ui();
         ui.set_selected_index(-1);
         ui.set_total_progress(0.0);
@@ -261,6 +264,9 @@ impl App {
                     Status::Failed(msg) => (3, format!("失敗：{msg}"), None),
                     Status::Cancelled => (5, "已取消".to_string(), None),
                 };
+                if state == 2 {
+                    self.last_output.replace(output.clone());
+                }
                 self.outputs.borrow_mut()[i] = output;
                 self.set_row(i, |r| {
                     r.state = state;
@@ -296,15 +302,20 @@ impl App {
         }
     }
 
+    /// 開啟實際輸出檔所在的資料夾（不是目前的設定）：優先選取的列，其次最近一筆完成的輸出
     fn open_output_folder(&self) {
-        let target = self
-            .settings
-            .borrow()
-            .output_dir
-            .clone()
-            .or_else(|| self.outputs.borrow().iter().rev().flatten().next().and_then(|p| p.parent().map(Path::to_path_buf)));
-        if let Some(dir) = target {
+        let outputs = self.outputs.borrow();
+        let selected = usize::try_from(self.ui().get_selected_index()).ok().and_then(|i| outputs.get(i).cloned().flatten());
+        let target = selected.or_else(|| self.last_output.borrow().clone()).or_else(|| outputs.iter().rev().flatten().next().cloned());
+        let Some(file) = target else { return };
+        if file.exists() {
+            // 開啟資料夾並選取該檔；Windows 路徑不會含引號，可直接包起來
+            use std::os::windows::process::CommandExt;
+            let _ = std::process::Command::new("explorer").raw_arg(format!("/select,\"{}\"", file.display())).spawn();
+        } else if let Some(dir) = file.parent().filter(|d| d.is_dir()) {
             let _ = std::process::Command::new("explorer").arg(dir).spawn();
+        } else {
+            self.ui().set_status("找不到輸出檔所在的資料夾，可能已被移動或刪除。".into());
         }
     }
 }
@@ -349,6 +360,7 @@ fn main() -> Result<(), slint::PlatformError> {
         batch: RefCell::default(),
         quit_when_done: RefCell::new(false),
         scan: RefCell::default(),
+        last_output: RefCell::default(),
     });
     APP.with(|a| *a.borrow_mut() = Some(state));
 
