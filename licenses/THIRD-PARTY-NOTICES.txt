@@ -6713,7 +6713,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------
 適用於：
-  pdfium-render 0.9.4（MIT OR Apache-2.0）
+  pdfium-render 0.9.5（MIT OR Apache-2.0）
 
 Licensed under either of
 
@@ -7064,7 +7064,7 @@ DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------
 適用於：
-  pulldown-cmark 0.13.5（MIT）
+  pulldown-cmark 0.13.6（MIT）
 
 The MIT License
 
@@ -7184,7 +7184,7 @@ Permission is granted to anyone to use this software for any purpose, including 
 
 ------------------------------------------------------------
 適用於：
-  rfd 0.17.2（MIT）
+  rfd 0.18.0（MIT）
 
 MIT License
 
