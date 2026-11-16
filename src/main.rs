@@ -4,21 +4,26 @@ use pdfword::job::{self, Conflict, Event, JobHandle, Status};
 use pdfword::settings::Settings;
 use slint::winit_030::{winit, EventResult, WinitWindowAccessor};
 use slint::{CloseRequestResponse, ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use pdfword::scan;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 slint::include_modules!();
 
 const LICENSES: &str = "\
 Slint 1.18.1 — Slint Royalty-free License 2.0
-PDFium（chromium/7881，bblanchon/pdfium-binaries）— BSD-3-Clause / Apache-2.0；\
+PDFium（chromium/8125，bblanchon/pdfium-binaries）— BSD-3-Clause / Apache-2.0；\
 內含 FreeType（FTL）、libjpeg-turbo（IJG/BSD）、OpenJPEG（BSD-2）、lcms2（MIT）、zlib、libpng、\
-libtiff、Abseil（Apache-2.0）、ICU（Unicode）、AGG、fast_float、simdutf、LLVM libc 等
-pdfium-render 0.9.4 — MIT / Apache-2.0
+libtiff、Abseil（Apache-2.0）、ICU（Unicode）、HarfBuzz（MIT）、Highway（Apache-2.0）、\
+dragonbox（Boost／Apache-2.0）、AGG、fast_float、simdutf、LLVM libc 等
+pdfium-render 0.9.5 — MIT / Apache-2.0
 docx-rs 0.4.22 — MIT
 rayon 1.12.0 — MIT / Apache-2.0
-rfd 0.17.2 — MIT
+rfd 0.18.0 — MIT
 image 0.25 — MIT / Apache-2.0
 serde、serde_json — MIT / Apache-2.0
 
@@ -34,6 +39,10 @@ struct App {
     /// 本次批次：批次索引 → 清單列索引
     batch: RefCell<Vec<usize>>,
     quit_when_done: RefCell<bool>,
+    /// 進行中的資料夾掃描（取消旗標）
+    scan: RefCell<Option<Arc<AtomicBool>>>,
+    /// 最近一筆實際寫出的輸出檔（開啟輸出資料夾用）
+    last_output: RefCell<Option<PathBuf>>,
 }
 
 thread_local! {
@@ -41,7 +50,12 @@ thread_local! {
 }
 
 fn app() -> Rc<App> {
-    APP.with(|a| a.borrow().clone().expect("App 尚未初始化"))
+    try_app().expect("App 尚未初始化")
+}
+
+/// 背景工作回報時視窗可能已關閉
+fn try_app() -> Option<Rc<App>> {
+    APP.with(|a| a.borrow().clone())
 }
 
 fn pdfium_dir() -> PathBuf {
@@ -53,46 +67,57 @@ fn pdfium_dir() -> PathBuf {
     exe_dir
 }
 
-fn is_pdf(p: &Path) -> bool {
-    p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
-}
-
-/// 遞迴找出資料夾中的 PDF（依路徑排序）
-fn collect_pdfs(dir: &Path, out: &mut Vec<PathBuf>, depth: u32) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
-    let mut entries: Vec<PathBuf> = rd.filter_map(|e| e.ok().map(|e| e.path())).collect();
-    entries.sort();
-    for p in entries {
-        if p.is_dir() {
-            if depth < 16 {
-                collect_pdfs(&p, out, depth + 1);
-            }
-        } else if is_pdf(&p) {
-            out.push(p);
-        }
-    }
-}
-
 impl App {
     fn ui(&self) -> AppWindow {
         self.ui.upgrade().expect("視窗已關閉")
     }
 
+    /// 加入檔案或資料夾。含資料夾時在背景執行緒掃描，避免大型或網路資料夾卡住視窗。
     fn add_paths(&self, items: impl IntoIterator<Item = PathBuf>) {
-        let mut found = Vec::new();
-        for p in items {
-            if p.is_dir() {
-                collect_pdfs(&p, &mut found, 0);
-            } else if is_pdf(&p) {
-                found.push(p);
-            }
+        let items: Vec<PathBuf> = items.into_iter().collect();
+        if !items.iter().any(|p| p.is_dir()) {
+            let found = items.into_iter().filter(|p| scan::is_pdf(p)).collect();
+            self.add_found(found, 0, false);
+            return;
         }
+        let cancel = Arc::new(AtomicBool::new(false));
+        *self.scan.borrow_mut() = Some(cancel.clone());
+        let ui = self.ui();
+        ui.set_scanning(true);
+        ui.set_status("正在掃描資料夾…".into());
+        let weak = self.ui.clone();
+        std::thread::spawn(move || {
+            let progress_weak = weak.clone();
+            let r = scan::scan(items, &cancel, move |found, dirs| {
+                let _ = progress_weak.upgrade_in_event_loop(move |ui| {
+                    ui.set_status(format!("正在掃描資料夾…已檢查 {dirs} 個資料夾，找到 {found} 個 PDF").into());
+                });
+            });
+            let _ = weak.upgrade_in_event_loop(move |ui| {
+                ui.set_scanning(false);
+                if let Some(a) = try_app() {
+                    *a.scan.borrow_mut() = None;
+                    a.add_found(r.found, r.skipped, r.cancelled);
+                }
+            });
+        });
+    }
+
+    fn cancel_scan(&self) {
+        if let Some(c) = self.scan.borrow().as_ref() {
+            c.store(true, Ordering::Relaxed);
+            self.ui().set_status("正在取消掃描…".into());
+        }
+    }
+
+    /// 把找到的 PDF 加入清單（略過已在清單中的），並回報加入與略過數量
+    fn add_found(&self, found: Vec<PathBuf>, skipped: usize, cancelled: bool) {
         let mut added = 0;
         {
             let mut paths = self.paths.borrow_mut();
+            let mut known: HashSet<String> = paths.iter().map(|q| q.to_string_lossy().to_lowercase()).collect();
             for p in found {
-                let key = p.to_string_lossy().to_lowercase();
-                if paths.iter().any(|q| q.to_string_lossy().to_lowercase() == key) {
+                if !known.insert(p.to_string_lossy().to_lowercase()) {
                     continue;
                 }
                 self.rows.push(FileRow {
@@ -107,12 +132,17 @@ impl App {
                 added += 1;
             }
         }
-        let ui = self.ui();
-        ui.set_status(if added > 0 {
-            format!("已加入 {added} 個 PDF 檔案。").into()
+        let mut msg = if cancelled {
+            format!("已取消掃描，加入 {added} 個 PDF 檔案")
+        } else if added > 0 {
+            format!("已加入 {added} 個 PDF 檔案")
         } else {
-            "沒有找到新的 PDF 檔案。".into()
-        });
+            "沒有找到新的 PDF 檔案".to_string()
+        };
+        if skipped > 0 {
+            msg += &format!("（已略過 {skipped} 個無法讀取或層數過深的項目）");
+        }
+        self.ui().set_status(format!("{msg}。").into());
     }
 
     fn remove(&self, i: usize) {
@@ -128,6 +158,7 @@ impl App {
         self.rows.set_vec(Vec::new());
         self.paths.borrow_mut().clear();
         self.outputs.borrow_mut().clear();
+        self.last_output.replace(None);
         let ui = self.ui();
         ui.set_selected_index(-1);
         ui.set_total_progress(0.0);
@@ -234,6 +265,9 @@ impl App {
                     Status::Failed(msg) => (3, format!("失敗：{msg}"), None),
                     Status::Cancelled => (5, "已取消".to_string(), None),
                 };
+                if state == 2 {
+                    self.last_output.replace(output.clone());
+                }
                 self.outputs.borrow_mut()[i] = output;
                 self.set_row(i, |r| {
                     r.state = state;
@@ -269,15 +303,20 @@ impl App {
         }
     }
 
+    /// 開啟實際輸出檔所在的資料夾（不是目前的設定）：優先選取的列，其次最近一筆完成的輸出
     fn open_output_folder(&self) {
-        let target = self
-            .settings
-            .borrow()
-            .output_dir
-            .clone()
-            .or_else(|| self.outputs.borrow().iter().rev().flatten().next().and_then(|p| p.parent().map(Path::to_path_buf)));
-        if let Some(dir) = target {
+        let outputs = self.outputs.borrow();
+        let selected = usize::try_from(self.ui().get_selected_index()).ok().and_then(|i| outputs.get(i).cloned().flatten());
+        let target = selected.or_else(|| self.last_output.borrow().clone()).or_else(|| outputs.iter().rev().flatten().next().cloned());
+        let Some(file) = target else { return };
+        if file.exists() {
+            // 開啟資料夾並選取該檔；Windows 路徑不會含引號，可直接包起來
+            use std::os::windows::process::CommandExt;
+            let _ = std::process::Command::new("explorer").raw_arg(format!("/select,\"{}\"", file.display())).spawn();
+        } else if let Some(dir) = file.parent().filter(|d| d.is_dir()) {
             let _ = std::process::Command::new("explorer").arg(dir).spawn();
+        } else {
+            self.ui().set_status("找不到輸出檔所在的資料夾，可能已被移動或刪除。".into());
         }
     }
 }
@@ -321,13 +360,15 @@ fn main() -> Result<(), slint::PlatformError> {
         job: RefCell::default(),
         batch: RefCell::default(),
         quit_when_done: RefCell::new(false),
+        scan: RefCell::default(),
+        last_output: RefCell::default(),
     });
     APP.with(|a| *a.borrow_mut() = Some(state));
 
-    // 命令列參數（拖放到 exe 圖示、「開啟檔案」）直接加入清單
+    // 命令列參數（拖放到 exe 圖示、「開啟檔案」）在事件迴圈開始後加入清單
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     if !args.is_empty() {
-        app().add_paths(args);
+        slint::Timer::single_shot(std::time::Duration::ZERO, move || app().add_paths(args));
     }
 
     ui.on_add_files(|| {
@@ -397,6 +438,7 @@ fn main() -> Result<(), slint::PlatformError> {
             a.ui().set_status("正在取消…".into());
         }
     });
+    ui.on_cancel_scan(|| app().cancel_scan());
     ui.on_open_output(|| app().open_output_folder());
     ui.on_open_file(|i| {
         let a = app();
@@ -423,6 +465,9 @@ fn main() -> Result<(), slint::PlatformError> {
     // 轉換中關閉視窗：先取消，等工作結束再離開，避免留下暫存檔
     ui.window().on_close_requested(|| {
         let a = app();
+        if let Some(c) = a.scan.borrow().as_ref() {
+            c.store(true, Ordering::Relaxed);
+        }
         if let Some(j) = a.job.borrow().as_ref() {
             j.cancel();
             *a.quit_when_done.borrow_mut() = true;
@@ -440,7 +485,7 @@ fn main() -> Result<(), slint::PlatformError> {
         match ev {
             winit::event::WindowEvent::HoveredFile(_) => {
                 let a = app();
-                if !a.ui().get_running() {
+                if !a.ui().get_running() && !a.ui().get_scanning() {
                     a.ui().set_drag_hover(true);
                 }
             }
@@ -451,6 +496,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 ui.set_drag_hover(false);
                 if ui.get_running() {
                     ui.set_status("轉換進行中，請完成後再加入檔案。".into());
+                } else if ui.get_scanning() {
+                    ui.set_status("正在掃描資料夾，請完成或取消後再加入檔案。".into());
                 } else {
                     a.add_paths([path.clone()]);
                 }

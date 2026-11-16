@@ -1,6 +1,7 @@
 //! 開發用：命令列轉換
 //! 用法：cargo run --example convert -- <輸入.pdf> <輸出.docx>
 
+use pdfword::output::{Conflict, Reservations, Target};
 use std::sync::atomic::AtomicBool;
 
 fn main() {
@@ -9,8 +10,10 @@ fn main() {
     let dll_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("vendor/pdfium");
     pdfword::extract::init(&dll_dir).unwrap();
     let t = std::time::Instant::now();
-    match pdfword::convert::convert_file(input.as_ref(), output.as_ref(), &AtomicBool::new(false), &|_| {}) {
-        Ok(o) => println!("完成：{} 頁，{:?}，無文字層={}", o.pages, t.elapsed(), o.no_text),
+    // 開發用工具：明確指定輸出檔，沿用覆寫行為
+    let target = Target::exact(output.as_ref(), Conflict::Overwrite);
+    match pdfword::convert::convert_file(input.as_ref(), &target, &Reservations::default(), &AtomicBool::new(false), &|_| {}) {
+        Ok((o, _)) => println!("完成：{} 頁，{:?}，無文字層={}", o.pages, t.elapsed(), o.no_text),
         Err(e) => println!("失敗：{e}"),
     }
 }

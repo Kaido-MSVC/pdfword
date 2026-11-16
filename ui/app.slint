@@ -76,6 +76,9 @@ export component AppWindow inherits Window {
     in property <int> max-threads: 8;
     in-out property <int> theme: 0;
     in property <bool> running: false;
+    // 背景掃描資料夾中
+    in property <bool> scanning: false;
+    property <bool> busy: running || scanning;
     in property <bool> ready: true;
     in property <float> total-progress: 0;
     in property <string> status: "將 PDF 檔案或資料夾拖放到視窗中，或按「加入檔案」。";
@@ -92,6 +95,7 @@ export component AppWindow inherits Window {
     callback reset-output();
     callback start();
     callback cancel();
+    callback cancel-scan();
     callback open-output();
     callback open-file(int);
     callback settings-changed();
@@ -106,9 +110,9 @@ export component AppWindow inherits Window {
     MenuBar {
         Menu {
             title: "檔案";
-            MenuItem { title: "加入檔案…"; enabled: !running; activated => { add-files(); } }
-            MenuItem { title: "加入資料夾…"; enabled: !running; activated => { add-folder(); } }
-            MenuItem { title: "清除清單"; enabled: !running; activated => { clear-list(); } }
+            MenuItem { title: "加入檔案…"; enabled: !busy; activated => { add-files(); } }
+            MenuItem { title: "加入資料夾…"; enabled: !busy; activated => { add-folder(); } }
+            MenuItem { title: "清除清單"; enabled: !busy; activated => { clear-list(); } }
             MenuSeparator { }
             MenuItem { title: "結束"; activated => { quit(); } }
         }
@@ -129,10 +133,10 @@ export component AppWindow inherits Window {
     VerticalBox {
         HorizontalLayout {
             spacing: 8px;
-            Button { text: "加入檔案"; enabled: !running; clicked => { add-files(); } }
-            Button { text: "加入資料夾"; enabled: !running; clicked => { add-folder(); } }
-            Button { text: "移除"; enabled: !running && selected-index >= 0; clicked => { remove-selected(); } }
-            Button { text: "清除清單"; enabled: !running && files.length > 0; clicked => { clear-list(); } }
+            Button { text: "加入檔案"; enabled: !busy; clicked => { add-files(); } }
+            Button { text: "加入資料夾"; enabled: !busy; clicked => { add-folder(); } }
+            Button { text: "移除"; enabled: !busy && selected-index >= 0; clicked => { remove-selected(); } }
+            Button { text: "清除清單"; enabled: !busy && files.length > 0; clicked => { clear-list(); } }
             Rectangle { horizontal-stretch: 1; }
             Text {
                 vertical-alignment: center;
@@ -204,7 +208,7 @@ export component AppWindow inherits Window {
             Rectangle { horizontal-stretch: 1; }
         }
 
-        ProgressIndicator { height: 8px; progress: total-progress; }
+        ProgressIndicator { height: 8px; progress: total-progress; indeterminate: scanning; }
 
         HorizontalLayout {
             spacing: 8px;
@@ -219,11 +223,15 @@ export component AppWindow inherits Window {
                 enabled: can-open-output && !running;
                 clicked => { open-output(); }
             }
-            if !running: Button {
+            if !busy: Button {
                 text: "開始轉換";
                 primary: true;
                 enabled: ready && files.length > 0;
                 clicked => { start(); }
+            }
+            if scanning: Button {
+                text: "取消掃描";
+                clicked => { cancel-scan(); }
             }
             if running: Button {
                 text: "取消";
