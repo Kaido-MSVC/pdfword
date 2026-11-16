@@ -22,7 +22,7 @@ libtiff、Abseil（Apache-2.0）、ICU（Unicode）、AGG、fast_float、simdutf
 pdfium-render 0.9.5 — MIT / Apache-2.0
 docx-rs 0.4.22 — MIT
 rayon 1.12.0 — MIT / Apache-2.0
-rfd 0.17.2 — MIT
+rfd 0.18.0 — MIT
 image 0.25 — MIT / Apache-2.0
 serde、serde_json — MIT / Apache-2.0
 
