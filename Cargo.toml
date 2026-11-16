@@ -1,6 +1,6 @@
 [package]
 name = "pdfword"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "PDF 轉 Word（DOCX）批次轉換工具"
 license = "MIT"
