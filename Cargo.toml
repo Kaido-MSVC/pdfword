@@ -24,6 +24,10 @@ windows-sys = { version = "=0.61.2", features = ["Win32_Storage_FileSystem"] }
 slint-build = "=1.18.1"
 winresource = "=0.1.34"
 
+# 相依套件不產生除錯資訊，縮小 debug 產物（自己的程式碼仍保留完整除錯資訊）
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
