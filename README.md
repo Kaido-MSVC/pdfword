@@ -8,9 +8,15 @@ Windows x64 桌面程式：把 PDF 批次轉換成可編輯的 Word（DOCX），
 
 ## 正式下載
 
-[v0.1.1 Release](https://github.com/Kaido-MSVC/pdfword/releases/tag/v0.1.1) 提供 Windows x64 Portable 與 MSI，請以 Release 內的 SHA256SUMS.txt 核對下載檔案。
+[PDF 轉 Word v0.1.2 正式發布](https://github.com/Kaido-MSVC/pdfword/releases/tag/v0.1.2) 提供 Windows x64 下載。
 
-程式與安裝程式均未數位簽章。採流式重排，不保證所有 PDF 都能完全還原；不含 OCR。v0.1.1 的 MSI 已在 Windows 11 實機驗證「從 0.1.0 升級安裝」與「解除安裝／重新安裝」，解除安裝會保留使用者設定。完整驗證範圍與限制見 [v0.1.1 發布說明](docs/RELEASE-v0.1.1.md)。
+- [Portable ZIP](https://github.com/Kaido-MSVC/pdfword/releases/download/v0.1.2/pdfword-0.1.2-portable-x64.zip)
+- [MSI 安裝程式](https://github.com/Kaido-MSVC/pdfword/releases/download/v0.1.2/pdfword-0.1.2-x64.msi)
+- [SHA256SUMS.txt](https://github.com/Kaido-MSVC/pdfword/releases/download/v0.1.2/SHA256SUMS.txt) 可用來核對下載的封包。
+
+建議 v0.1.0 使用者升級至 v0.1.2，以取得 v0.1.1 已納入的 DOCX 撞名防覆寫修正。
+
+程式與安裝程式均未數位簽章。採流式重排，不保證所有 PDF 都能完全還原；不含 OCR。v0.1.1 的 MSI 已在 Windows 11 實機驗證「從 0.1.0 升級安裝」與「解除安裝／重新安裝」，解除安裝會保留使用者設定。完整驗證範圍與限制見 [v0.1.1 發布說明](docs/RELEASE-v0.1.1.md)。舊版封包仍可從 [v0.1.1 Release](https://github.com/Kaido-MSVC/pdfword/releases/tag/v0.1.1) 下載。
 
 ## 技術組成
 
