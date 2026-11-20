@@ -4,11 +4,13 @@ Windows x64 桌面程式：把 PDF 批次轉換成可編輯的 Word（DOCX），
 
 使用方式見 [docs/使用說明.txt](docs/使用說明.txt)。
 
+各版本的變更見 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 正式下載
 
 [v0.1.1 Release](https://github.com/Kaido-MSVC/pdfword/releases/tag/v0.1.1) 提供 Windows x64 Portable 與 MSI，請以 Release 內的 SHA256SUMS.txt 核對下載檔案。
 
-程式與安裝程式均未數位簽章。採流式重排，不保證所有 PDF 都能完全還原；不含 OCR。MSI 已在 Windows 11 實機驗證「從 0.1.0 升級安裝」與「解除安裝／重新安裝」，解除安裝會保留使用者設定。完整驗證範圍與限制見 [v0.1.1 發布說明](docs/RELEASE-v0.1.1.md)。
+程式與安裝程式均未數位簽章。採流式重排，不保證所有 PDF 都能完全還原；不含 OCR。v0.1.1 的 MSI 已在 Windows 11 實機驗證「從 0.1.0 升級安裝」與「解除安裝／重新安裝」，解除安裝會保留使用者設定。完整驗證範圍與限制見 [v0.1.1 發布說明](docs/RELEASE-v0.1.1.md)。
 
 ## 技術組成
 

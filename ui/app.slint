@@ -82,6 +82,7 @@ export component AppWindow inherits Window {
     in property <bool> ready: true;
     in property <float> total-progress: 0;
     in property <string> status: "將 PDF 檔案或資料夾拖放到視窗中，或按「加入檔案」。";
+    in property <string> settings-error: "";
     in property <bool> drag-hover: false;
     in property <string> version: "";
     in property <string> licenses: "";
@@ -209,6 +210,11 @@ export component AppWindow inherits Window {
         }
 
         ProgressIndicator { height: 8px; progress: total-progress; indeterminate: scanning; }
+
+        if settings-error != "": Text {
+            text: settings-error;
+            wrap: word-wrap;
+        }
 
         HorizontalLayout {
             spacing: 8px;

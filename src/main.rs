@@ -149,7 +149,15 @@ impl App {
         if i < self.rows.row_count() {
             self.rows.remove(i);
             self.paths.borrow_mut().remove(i);
-            self.outputs.borrow_mut().remove(i);
+            let mut outputs = self.outputs.borrow_mut();
+            if let Some(removed) = outputs.remove(i) {
+                let mut last = self.last_output.borrow_mut();
+                if last.as_ref() == Some(&removed) {
+                    *last = None;
+                }
+            }
+            self.ui()
+                .set_can_open_output(outputs.iter().any(Option::is_some));
         }
         self.ui().set_selected_index(-1);
     }
@@ -167,11 +175,24 @@ impl App {
 
     fn save_settings_from_ui(&self) {
         let ui = self.ui();
-        let mut s = self.settings.borrow_mut();
-        s.theme = ui.get_theme();
-        s.conflict = ui.get_conflict_mode();
-        s.threads = ui.get_threads();
-        s.save();
+        self.update_settings(|s| {
+            s.theme = ui.get_theme();
+            s.conflict = ui.get_conflict_mode();
+            s.threads = ui.get_threads();
+        });
+    }
+
+    fn update_settings(&self, update: impl FnOnce(&mut Settings)) {
+        let result = {
+            let mut settings = self.settings.borrow_mut();
+            update(&mut settings);
+            settings.save()
+        };
+        let message = match result {
+            Ok(()) => SharedString::new(),
+            Err(error) => format!("無法儲存設定：{error}").into(),
+        };
+        self.ui().set_settings_error(message);
     }
 
     fn set_row(&self, i: usize, f: impl FnOnce(&mut FileRow)) {
@@ -379,9 +400,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
         if let Some(files) = dlg.pick_files() {
             if let Some(dir) = files.first().and_then(|f| f.parent()) {
-                let mut s = a.settings.borrow_mut();
-                s.last_input_dir = Some(dir.to_path_buf());
-                s.save();
+                a.update_settings(|s| s.last_input_dir = Some(dir.to_path_buf()));
             }
             a.add_paths(files);
         }
@@ -393,11 +412,7 @@ fn main() -> Result<(), slint::PlatformError> {
             dlg = dlg.set_directory(d);
         }
         if let Some(dir) = dlg.pick_folder() {
-            {
-                let mut s = a.settings.borrow_mut();
-                s.last_input_dir = Some(dir.clone());
-                s.save();
-            }
+            a.update_settings(|s| s.last_input_dir = Some(dir.clone()));
             a.add_paths([dir]);
         }
     });
@@ -418,17 +433,13 @@ fn main() -> Result<(), slint::PlatformError> {
         }
         if let Some(dir) = dlg.pick_folder() {
             a.ui().set_output_dir(dir.to_string_lossy().into_owned().into());
-            let mut s = a.settings.borrow_mut();
-            s.output_dir = Some(dir);
-            s.save();
+            a.update_settings(|s| s.output_dir = Some(dir));
         }
     });
     ui.on_reset_output(|| {
         let a = app();
         a.ui().set_output_dir(SharedString::new());
-        let mut s = a.settings.borrow_mut();
-        s.output_dir = None;
-        s.save();
+        a.update_settings(|s| s.output_dir = None);
     });
     ui.on_start(|| app().start());
     ui.on_cancel(|| {

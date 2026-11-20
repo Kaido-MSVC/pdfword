@@ -12,8 +12,12 @@ fn setup(test: &str) -> Option<PathBuf> {
     if !common::init_pdfium(test) {
         return None;
     }
-    let dir = std::env::temp_dir().join(format!("pdfword-test-{}-{}", std::process::id(), rand_suffix()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = std::env::temp_dir().join(format!(
+        "pdfword-test-{test}-{}-{}",
+        std::process::id(),
+        rand_suffix()
+    ));
+    std::fs::create_dir(&dir).expect("無法建立測試專用輸出資料夾");
     Some(dir)
 }
 

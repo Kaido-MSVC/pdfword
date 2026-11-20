@@ -127,11 +127,23 @@ static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 impl TempFile {
     /// 在 `output` 同一資料夾建立新的暫存檔（不會覆用既有檔名）
     pub fn create_near(output: &Path) -> io::Result<(TempFile, fs::File)> {
-        let name = output.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        Self::create_with_suffix(output, "tmp.docx")
+    }
+
+    pub(crate) fn create_with_suffix(output: &Path, suffix: &str) -> io::Result<(Self, fs::File)> {
+        let name = output
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         loop {
             let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-            let path = output.with_file_name(format!(".{name}.{}-{seq}.tmp.docx", std::process::id()));
-            match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            let path =
+                output.with_file_name(format!(".{name}.{}-{seq}.{suffix}", std::process::id()));
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
                 Ok(f) => return Ok((TempFile { path: Some(path) }, f)),
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(e) => return Err(e),
@@ -141,6 +153,12 @@ impl TempFile {
 
     pub fn path(&self) -> &Path {
         self.path.as_deref().expect("暫存檔已提交")
+    }
+
+    pub(crate) fn replace(self, dest: &Path) -> io::Result<()> {
+        fs::rename(self.path(), dest)?;
+        self.disarm();
+        Ok(())
     }
 
     fn disarm(mut self) {
@@ -182,8 +200,7 @@ pub fn move_no_replace(from: &Path, to: &Path) -> io::Result<()> {
 pub fn commit(tmp: TempFile, target: &Target, res: &Reservations, exists: impl Fn(&Path) -> bool) -> io::Result<Committed> {
     if target.replace {
         // 使用者明確選擇覆寫
-        fs::rename(tmp.path(), &target.path)?;
-        tmp.disarm();
+        tmp.replace(&target.path)?;
         return Ok(Committed::Saved(target.path.clone()));
     }
     let mut dest = target.path.clone();

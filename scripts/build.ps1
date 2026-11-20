@@ -13,17 +13,18 @@ $Version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' |
 $Name = "pdfword-$Version"
 $Dist = Join-Path $Root 'dist'
 $AppDir = Join-Path $Dist $Name
+$TargetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { 'target' }
 
 Step "PDFium"
 & (Join-Path $PSScriptRoot 'fetch-pdfium.ps1')
 
 if (-not $SkipTests) {
     Step "測試"
-    cargo test --release; Check 'cargo test'
+    cargo test --release --locked; Check 'cargo test'
 }
 
 Step "建置 release（lld-link）"
-cargo build --release; Check 'cargo build'
+cargo build --release --locked; Check 'cargo build'
 
 Step "第三方授權聲明"
 python -I (Join-Path $PSScriptRoot 'gen-notices.py'); Check 'gen-notices.py'
@@ -32,8 +33,9 @@ python -I (Join-Path $PSScriptRoot 'make-license-rtf.py'); Check 'make-license-r
 Step "整理程式資料夾 $AppDir"
 if (Test-Path $AppDir) { Remove-Item -Recurse -Force $AppDir }
 New-Item -ItemType Directory -Force (Join-Path $AppDir 'licenses\pdfium') | Out-Null
-Copy-Item target\release\pdfword.exe $AppDir
+Copy-Item (Join-Path $TargetDir 'release\pdfword.exe') $AppDir
 Copy-Item vendor\pdfium\pdfium.dll $AppDir
+Copy-Item LICENSE $AppDir
 Copy-Item licenses\THIRD-PARTY-NOTICES.txt (Join-Path $AppDir 'licenses')
 Copy-Item vendor\pdfium\LICENSE (Join-Path $AppDir 'licenses\pdfium\pdfium-binaries-LICENSE.txt')
 Copy-Item vendor\pdfium\licenses\* (Join-Path $AppDir 'licenses\pdfium')

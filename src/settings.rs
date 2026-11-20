@@ -1,7 +1,10 @@
 //! 使用者設定：存於 %APPDATA%\pdfword\settings.json
 
+use crate::output::TempFile;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::fs;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -37,17 +40,26 @@ impl Settings {
             .unwrap_or_default()
     }
 
-    pub fn save(&self) {
-        let Some(p) = path() else { return };
-        if let Some(dir) = p.parent() {
-            let _ = std::fs::create_dir_all(dir);
+    /// 以同資料夾的暫存檔寫入設定，成功後才取代原檔。
+    ///
+    /// # Errors
+    /// 找不到 APPDATA，或設定無法序列化、寫入、提交時傳回錯誤。
+    pub fn save(&self) -> io::Result<()> {
+        let path = path()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "找不到 APPDATA 環境變數"))?;
+        self.save_to(&path)
+    }
+
+    fn save_to(&self, path: &Path) -> io::Result<()> {
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir)?;
         }
-        if let Ok(s) = serde_json::to_string_pretty(self) {
-            let tmp = p.with_extension("json.tmp");
-            if std::fs::write(&tmp, s).is_ok() {
-                let _ = std::fs::rename(&tmp, &p);
-            }
-        }
+        let bytes = serde_json::to_vec_pretty(self).map_err(io::Error::other)?;
+        let (tmp, mut file) = TempFile::create_with_suffix(path, "tmp")?;
+        let written = file.write_all(&bytes);
+        drop(file);
+        written?;
+        tmp.replace(path)
     }
 }
 
@@ -64,5 +76,29 @@ mod tests {
         let partial: Settings = serde_json::from_str(r#"{"theme":1}"#).unwrap();
         assert_eq!(partial.theme, 1);
         assert_eq!(partial.conflict, 0);
+    }
+
+    #[test]
+    fn save_replaces_settings_and_cleans_up_after_failed_commit() {
+        let dir =
+            std::env::temp_dir().join(format!("pdfword-settings-test-{}", std::process::id()));
+        fs::create_dir(&dir).expect("無法建立設定測試資料夾");
+        let target = dir.join("settings.json");
+        let mut settings = Settings::default();
+        settings.save_to(&target).expect("首次儲存設定應成功");
+        settings.theme = 2;
+        settings.save_to(&target).expect("再次儲存應取代設定檔");
+        let loaded: Settings = serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
+        assert_eq!(loaded, settings);
+
+        let blocked = dir.join("blocked.json");
+        fs::create_dir(&blocked).unwrap();
+        assert!(settings.save_to(&blocked).is_err());
+        assert!(blocked.is_dir());
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 2, "不應留下設定暫存檔");
+
+        fs::remove_dir(blocked).unwrap();
+        fs::remove_file(target).unwrap();
+        fs::remove_dir(dir).unwrap();
     }
 }

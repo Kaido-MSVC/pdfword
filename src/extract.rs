@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 static PDFIUM: OnceLock<Pdfium> = OnceLock::new();
+static INIT: Mutex<()> = Mutex::new(());
 /// PDFium 不是執行緒安全的；以頁為單位序列化，讓多檔轉換時版面分析與輸出仍可平行
 static GATE: Mutex<()> = Mutex::new(());
 
@@ -51,12 +52,16 @@ impl From<PdfiumError> for ExtractError {
 
 /// 載入 exe 同目錄的 pdfium.dll
 pub fn init(dir: &Path) -> Result<(), String> {
+    // 套件內部先設定全域繫結，整段初始化必須保持互斥。
+    let _init = INIT
+        .lock()
+        .map_err(|_| "PDFium 初始化鎖已失效".to_owned())?;
     if PDFIUM.get().is_some() {
         return Ok(());
     }
     let bindings = Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(dir))
         .map_err(|e| format!("無法載入 pdfium.dll：{e:?}"))?;
-    let _ = PDFIUM.set(Pdfium::new(bindings));
+    PDFIUM.get_or_init(|| Pdfium::new(bindings));
     Ok(())
 }
 
