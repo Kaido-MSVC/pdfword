@@ -3,14 +3,18 @@
 
 use pdfium_render::prelude::*;
 
-fn main() {
-    let input = std::env::args().nth(1).unwrap();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let input = std::env::args_os()
+        .nth(1)
+        .ok_or("用法：glyphs <輸入.pdf>")?;
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("vendor/pdfium");
-    let pdfium = Pdfium::new(Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(&dir)).unwrap());
-    let doc = pdfium.load_pdf_from_byte_vec(std::fs::read(input).unwrap(), None).unwrap();
-    let page = doc.pages().get(0).unwrap();
+    let pdfium = Pdfium::new(Pdfium::bind_to_library(
+        Pdfium::pdfium_platform_library_name_at_path(&dir),
+    )?);
+    let doc = pdfium.load_pdf_from_byte_vec(std::fs::read(input)?, None)?;
+    let page = doc.pages().get(0)?;
     let h = page.height().value;
-    let text = page.text().unwrap();
+    let text = page.text()?;
     for c in text.chars().iter() {
         let ch = c.unicode_char().unwrap_or('?');
         let l = c.loose_bounds().ok();
@@ -34,4 +38,5 @@ fn main() {
             c.render_mode().ok(),
         );
     }
+    Ok(())
 }

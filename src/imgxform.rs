@@ -81,20 +81,27 @@ pub fn dihedral(src: &RgbaImage, swap: bool, flip_x: bool, flip_y: bool) -> Rgba
 pub fn warp(src: &RgbaImage, p: &Placement, bbox: (f32, f32, f32, f32), max_px: u32) -> Option<RgbaImage> {
     let (w, h) = src.dimensions();
     let (bw, bh) = (bbox.2 - bbox.0, bbox.3 - bbox.1);
-    if w == 0 || h == 0 || !(bw > 0.0 && bh > 0.0) {
+    if w == 0
+        || h == 0
+        || max_px == 0
+        || !(bw.is_finite() && bh.is_finite() && bw > 0.0 && bh > 0.0)
+    {
         return None;
     }
     // 保持來源解析度（px/pt），再限制最長邊
     let mut s = (w as f32 / len(p.cx)).max(h as f32 / len(p.ry));
     s = s.min(max_px as f32 / bw.max(bh));
-    let (ow, oh) = (((bw * s).ceil() as u32).max(1), ((bh * s).ceil() as u32).max(1));
     let det = p.cx.0 * p.ry.1 - p.cx.1 * p.ry.0;
-    if det.abs() < 1e-6 {
+    if !s.is_finite() || s <= 0.0 || !det.is_finite() || det.abs() < 1e-6 {
         return None;
     }
+    // 長邊上限已用於計算倍率，再限制一次像素尺寸以吸收浮點乘除的捨入誤差。
+    let output_dimension =
+        |side: f32| f64::from((side * s).ceil()).clamp(1.0, f64::from(max_px)) as u32;
+    let (ow, oh) = (output_dimension(bw), output_dimension(bh));
     let sample = |x: f32, y: f32| -> [f32; 4] {
         let (x, y) = (x.clamp(0.0, (w - 1) as f32), y.clamp(0.0, (h - 1) as f32));
-        let (x0, y0) = (x.floor() as u32, y.floor() as u32);
+        let (x0, y0) = ((x.floor() as u32).min(w - 1), (y.floor() as u32).min(h - 1));
         let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
         let (fx, fy) = (x - x0 as f32, y - y0 as f32);
         let px = |x, y| src.get_pixel(x, y).0.map(f32::from);

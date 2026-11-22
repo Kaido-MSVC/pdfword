@@ -5,6 +5,9 @@
 
 use crate::model::Rect;
 
+/// 1 pt 一格，限制欄間空白偵測的直方圖大小。
+const MAX_HISTOGRAM_WIDTH: f32 = 100_000.0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemKind {
     Text,
@@ -71,14 +74,19 @@ pub fn reading_order(items: &[Item]) -> Vec<(usize, usize)> {
 
 /// 回傳 gutter 的 x 範圍清單（由左到右）
 fn find_gutters(items: &[Item]) -> Vec<(f32, f32)> {
-    let text: Vec<&Rect> = items.iter().filter(|i| i.kind == ItemKind::Text).map(|i| &i.bbox).collect();
+    let text: Vec<&Rect> = items
+        .iter()
+        .filter(|i| i.kind == ItemKind::Text)
+        .map(|i| &i.bbox)
+        .filter(|r| r.x0.is_finite() && r.x1.is_finite() && r.x0 <= r.x1)
+        .collect();
     if text.len() < 6 {
         return Vec::new();
     }
     let left = text.iter().map(|r| r.x0).fold(f32::MAX, f32::min);
     let right = text.iter().map(|r| r.x1).fold(f32::MIN, f32::max);
     let cw = right - left;
-    if cw < 100.0 {
+    if !(100.0..=MAX_HISTOGRAM_WIDTH).contains(&cw) {
         return Vec::new();
     }
     let narrow: Vec<&Rect> = text.iter().copied().filter(|r| r.width() < cw * 0.6).collect();
@@ -86,7 +94,7 @@ fn find_gutters(items: &[Item]) -> Vec<(f32, f32)> {
         return Vec::new();
     }
 
-    // 1pt 解析度的覆蓋直方圖
+    // 以上已驗證寬度，所有文字端點都在 [left, right] 內。
     let n = cw.ceil() as usize + 1;
     let mut hist = vec![0usize; n];
     for r in &narrow {
@@ -150,6 +158,22 @@ mod tests {
 
     fn text(x0: f32, y0: f32, x1: f32) -> Item {
         Item { bbox: Rect::new(x0, y0, x1, y0 + 10.0), kind: ItemKind::Text }
+    }
+
+    #[test]
+    fn wide_content_uses_single_column_order() {
+        let items = [
+            text(70_000.0, 10.0, 110_000.0),
+            text(0.0, 10.0, 30_000.0),
+            text(70_000.0, 20.0, 110_000.0),
+            text(0.0, 20.0, 30_000.0),
+            text(70_000.0, 30.0, 110_000.0),
+            text(0.0, 30.0, 30_000.0),
+        ];
+        assert_eq!(
+            reading_order(&items),
+            vec![(1, 0), (0, 0), (3, 0), (2, 0), (5, 0), (4, 0)]
+        );
     }
 
     #[test]

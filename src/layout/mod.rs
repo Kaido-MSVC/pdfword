@@ -10,6 +10,7 @@ pub mod underlines;
 use crate::model::{Align, Block, Cell, Glyph, PageData, PageLayout, Rect, Row, Table, VMerge};
 use columns::{Item, ItemKind};
 use lines::Line;
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 
 /// 全文件的本文字級：以字數加權的最常見字級
@@ -17,14 +18,15 @@ pub fn body_size<'a>(pages: impl IntoIterator<Item = &'a PageData>) -> f32 {
     let mut counts: HashMap<i32, usize> = HashMap::new();
     for p in pages {
         for g in &p.glyphs {
-            if !g.ch.is_whitespace() {
-                *counts.entry((g.size * 2.0).round() as i32).or_default() += 1;
+            let half_points = (g.size * 2.0).round();
+            if !g.ch.is_whitespace() && (1.0..2_147_483_648.0).contains(&half_points) {
+                *counts.entry(half_points as i32).or_default() += 1;
             }
         }
     }
     counts
         .into_iter()
-        .max_by_key(|&(k, n)| (n, -k))
+        .max_by_key(|&(k, n)| (n, Reverse(k)))
         .map(|(k, _)| k as f32 / 2.0)
         .unwrap_or(11.0)
 }
@@ -289,6 +291,18 @@ mod tests {
     use super::lines::tests::glyphs_at;
     use super::*;
     use crate::model::Ruling;
+
+    #[test]
+    fn body_size_ignores_invalid_font_sizes() {
+        let mut page = PageData {
+            glyphs: glyphs_at("abcd", 0.0, 20.0, 12.0),
+            ..Default::default()
+        };
+        page.glyphs[0].size = f32::NEG_INFINITY;
+        page.glyphs[1].size = f32::MAX;
+        page.glyphs[2].size = f32::NAN;
+        assert_eq!(body_size([&page]), 12.0);
+    }
 
     #[test]
     fn running_header_detected_and_removed() {

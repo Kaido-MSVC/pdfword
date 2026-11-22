@@ -20,6 +20,8 @@ static GATE: Mutex<()> = Mutex::new(());
 const MAX_IMAGE_PX: u32 = 3000;
 /// 向量圖點陣化倍率（2 = 144 DPI）
 const FIGURE_SCALE: f32 = 2.0;
+/// 整頁點陣化的長邊上限，限制裁出圖表前所需的頁面位圖大小。
+const MAX_FIGURE_RENDER_PX: u16 = 4096;
 
 #[derive(Debug)]
 pub enum ExtractError {
@@ -73,42 +75,50 @@ pub struct DocInfo {
 pub fn extract_document(
     path: &Path,
     cancel: &AtomicBool,
-    mut on_page: impl FnMut(usize, usize),
+    on_page: impl FnMut(usize, usize),
 ) -> Result<DocInfo, ExtractError> {
     let pdfium = PDFIUM.get().ok_or_else(|| ExtractError::Other("PDFium 尚未初始化".into()))?;
     // 以位元組載入，避免 PDFium 無法開啟含中文等非 ASCII 字元的路徑
     let bytes = std::fs::read(path).map_err(|e| ExtractError::Other(format!("無法讀取檔案：{e}")))?;
 
-    let doc = {
+    let (doc, page_count, total) = {
         let _g = GATE.lock().unwrap_or_else(|e| e.into_inner());
-        pdfium.load_pdf_from_byte_vec(bytes, None)?
+        let doc = pdfium.load_pdf_from_byte_vec(bytes, None)?;
+        let page_count = doc.pages().len();
+        let total = usize::try_from(page_count)
+            .map_err(|_| ExtractError::Other(format!("PDF 頁數超出範圍：{page_count}")))?;
+        (doc, page_count, total)
     };
-    let total = {
-        let _g = GATE.lock().unwrap_or_else(|e| e.into_inner());
-        doc.pages().len() as usize
-    };
-    let mut pages = Vec::with_capacity(total);
-    for i in 0..total {
+    let result = extract_pages(&doc, page_count, total, cancel, on_page);
+    // 頁面及其借用已離開範圍，成功、取消及錯誤都在同一把鎖內關閉文件。
+    let _g = GATE.lock().unwrap_or_else(|e| e.into_inner());
+    drop(doc);
+    result
+}
+
+fn extract_pages(
+    doc: &PdfDocument<'_>,
+    page_count: PdfPageIndex,
+    total: usize,
+    cancel: &AtomicBool,
+    mut on_page: impl FnMut(usize, usize),
+) -> Result<DocInfo, ExtractError> {
+    let mut pages = Vec::new();
+    for (i, page_index) in (0..page_count).enumerate() {
         if cancel.load(Ordering::Relaxed) {
-            let _g = GATE.lock().unwrap_or_else(|e| e.into_inner());
-            drop(doc);
             return Err(ExtractError::Cancelled);
         }
         let (mut data, raw_images) = {
             let _g = GATE.lock().unwrap_or_else(|e| e.into_inner());
-            let mut page = doc.pages().get(i as PdfPageIndex)?;
+            let mut page = doc.pages().get(page_index)?;
             // 取圖片像素時會暫時改物件矩陣；不要讓 pdfium-render 重新產生頁面內容串流
             page.set_content_regeneration_strategy(PdfPageContentRegenerationStrategy::Manual);
-            extract_page(&page, &doc)?
+            extract_page(&page, doc)?
         };
         // PNG 編碼在鎖外進行
         data.images = raw_images.into_iter().filter_map(to_image_item).collect();
         pages.push(data);
         on_page(i + 1, total);
-    }
-    {
-        let _g = GATE.lock().unwrap_or_else(|e| e.into_inner());
-        drop(doc);
     }
     Ok(DocInfo { pages })
 }
@@ -143,6 +153,11 @@ struct RawImage {
 fn extract_page(page: &PdfPage, doc: &PdfDocument) -> Result<(PageData, Vec<RawImage>), ExtractError> {
     let w = page.width().value;
     let h = page.height().value;
+    if !(w.is_normal() && h.is_normal() && w > 0.0 && h > 0.0) {
+        return Err(ExtractError::Other(format!(
+            "PDF 頁面尺寸無效：{w} × {h} pt"
+        )));
+    }
     let flip = |y: f32| h - y;
     let mut data = PageData { width: w, height: h, ..Default::default() };
 
@@ -203,25 +218,50 @@ fn extract_page(page: &PdfPage, doc: &PdfDocument) -> Result<(PageData, Vec<RawI
     let page_rect = Rect::new(0.0, 0.0, w, h);
     let regions = figures::detect(&shapes, &data.glyphs, &data.rulings, page_rect);
     if !regions.is_empty() {
-        let cfg = PdfRenderConfig::new().set_target_width(((w * FIGURE_SCALE) as i32).max(1));
+        let max_px = i32::from(MAX_FIGURE_RENDER_PX);
+        let width = (w * FIGURE_SCALE).clamp(1.0, f32::from(MAX_FIGURE_RENDER_PX)) as i32;
+        let cfg = PdfRenderConfig::new()
+            .set_target_width(width)
+            .set_maximum_width(max_px)
+            .set_maximum_height(max_px);
         if let Ok(img) = page.render_with_config(&cfg).and_then(|b| b.as_image()) {
-            let inside = |rx: f32, ry: f32| regions.iter().any(|r| r.contains_point(rx, ry));
+            let sx = img.width() as f32 / w;
+            let sy = img.height() as f32 / h;
+            let crops: Vec<_> = regions
+                .iter()
+                .filter_map(|r| {
+                    let (x, cw) = crop_axis(r.x0, r.width(), sx, img.width())?;
+                    let (y, ch) = crop_axis(r.y0, r.height(), sy, img.height())?;
+                    Some(RawImage {
+                        img: img.crop_imm(x, y, cw, ch),
+                        bbox: *r,
+                        placement: None,
+                    })
+                })
+                .collect();
+            let inside =
+                |rx: f32, ry: f32| crops.iter().any(|crop| crop.bbox.contains_point(rx, ry));
             data.glyphs.retain(|g| !inside(g.bbox.cx(), g.bbox.cy()));
             data.rulings.retain(|l| !inside((l.x0 + l.x1) / 2.0, (l.y0 + l.y1) / 2.0));
             images.retain(|i| !inside(i.bbox.cx(), i.bbox.cy()));
-            let sx = img.width() as f32 / w;
-            let sy = img.height() as f32 / h;
-            for r in &regions {
-                let (x, y) = ((r.x0 * sx).max(0.0) as u32, (r.y0 * sy).max(0.0) as u32);
-                let cw = ((r.width() * sx) as u32).min(img.width().saturating_sub(x));
-                let ch = ((r.height() * sy) as u32).min(img.height().saturating_sub(y));
-                if cw > 0 && ch > 0 {
-                    images.push(RawImage { img: img.crop_imm(x, y, cw, ch), bbox: *r, placement: None });
-                }
-            }
+            images.extend(crops);
         }
     }
     Ok((data, images))
+}
+
+fn crop_axis(origin: f32, length: f32, scale: f32, extent: u32) -> Option<(u32, u32)> {
+    let (start, pixels) = (origin * scale, length * scale);
+    if !start.is_finite() || start < 0.0 || !pixels.is_finite() || pixels < 1.0 {
+        return None;
+    }
+    // 點陣圖長邊受 MAX_FIGURE_RENDER_PX 限制，像素邊界可精確表示為 f32。
+    if start >= extent as f32 {
+        return None;
+    }
+    let start = start as u32;
+    let pixels = pixels.min((extent - start) as f32) as u32;
+    Some((start, pixels))
 }
 
 /// 依序套用矩陣（由內而外）
@@ -414,5 +454,15 @@ mod tests {
         assert_eq!(clean_font_name("Arial+Bold"), "Arial+Bold");
         assert!(name_is_bold("Arial,Bold"));
         assert!(name_is_italic("TimesNewRoman-Italic"));
+    }
+
+    #[test]
+    fn crop_axis_checks_bounds_before_quantizing() {
+        assert_eq!(crop_axis(1.25, 2.25, 2.0, 10), Some((2, 4)));
+        assert_eq!(crop_axis(4.5, 2.0, 2.0, 10), Some((9, 1)));
+        assert_eq!(crop_axis(5.0, 2.0, 2.0, 10), None);
+        assert_eq!(crop_axis(-2.0, 2.0, 2.0, 10), None);
+        assert_eq!(crop_axis(0.0, 0.25, 2.0, 10), None);
+        assert_eq!(crop_axis(0.0, f32::INFINITY, 2.0, 10), None);
     }
 }

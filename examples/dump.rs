@@ -4,11 +4,12 @@
 use pdfword::model::Block;
 use std::sync::atomic::AtomicBool;
 
-fn main() {
-    let path = std::env::args().nth(1).expect("用法：dump <檔案.pdf>");
+fn main() -> Result<(), String> {
+    let path = std::env::args_os().nth(1).ok_or("用法：dump <檔案.pdf>")?;
     let dll_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("vendor/pdfium");
-    pdfword::extract::init(&dll_dir).unwrap();
-    let doc = pdfword::extract::extract_document(path.as_ref(), &AtomicBool::new(false), |_, _| {}).unwrap();
+    pdfword::extract::init(&dll_dir)?;
+    let doc = pdfword::extract::extract_document(path.as_ref(), &AtomicBool::new(false), |_, _| {})
+        .map_err(|e| e.to_string())?;
     let body = pdfword::layout::body_size(&doc.pages);
     println!("本文字級 {body}");
     for (i, p) in doc.pages.iter().enumerate() {
@@ -45,6 +46,7 @@ fn main() {
             }
         }
     }
+    Ok(())
 }
 
 #[allow(dead_code)]

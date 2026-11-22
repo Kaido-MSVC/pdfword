@@ -180,10 +180,21 @@ impl Drop for TempFile {
 pub fn move_no_replace(from: &Path, to: &Path) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_WRITE_THROUGH};
-    let wide = |p: &Path| p.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<u16>>();
-    let (f, t) = (wide(from), wide(to));
+    let wide = |p: &Path| {
+        let mut units: Vec<u16> = p.as_os_str().encode_wide().collect();
+        if units.contains(&0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "檔案路徑含有 NUL 字元",
+            ));
+        }
+        units.push(0);
+        Ok(units)
+    };
+    let (f, t) = (wide(from)?, wide(to)?);
     // 不帶 MOVEFILE_REPLACE_EXISTING：目標存在時回傳 ERROR_ALREADY_EXISTS／ERROR_FILE_EXISTS
-    // SAFETY：兩個參數都是以 NUL 結尾、在呼叫期間有效的 UTF-16 字串
+    // SAFETY: 兩個指標各自指向有效的 Vec<u16>，以單一 NUL 結尾。
+    // Vec 在同步呼叫返回前皆存活且不會被更動，Win32 只讀取路徑且不保留指標。
     let ok = unsafe { MoveFileExW(f.as_ptr(), t.as_ptr(), MOVEFILE_WRITE_THROUGH) };
     if ok == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
 }
@@ -235,6 +246,15 @@ mod tests {
 
     fn p(s: &str) -> PathBuf {
         PathBuf::from(s)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn move_rejects_path_with_embedded_nul() {
+        let source = p("來源.docx");
+        let destination = p("輸出\0.docx");
+        let err = move_no_replace(&source, &destination).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
     }
 
     fn paths(v: &[Result<Target, PathBuf>]) -> Vec<Result<PathBuf, PathBuf>> {

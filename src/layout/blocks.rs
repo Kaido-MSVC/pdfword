@@ -22,16 +22,17 @@ fn is_bullet_start(l: &Line) -> bool {
 fn join_same_baseline(lines: &[Line]) -> Vec<Line> {
     let mut out: Vec<Line> = Vec::new();
     for l in lines {
-        if let Some(p) = out.last_mut() {
-            if (p.baseline - l.baseline).abs() < 0.3 * p.size.max(l.size) && l.bbox.x0 > p.bbox.x1 {
-                let mut tab = p.runs.last().cloned().unwrap();
-                tab.text.clear();
-                tab.tab = true;
-                p.runs.push(tab);
-                p.runs.extend(l.runs.iter().cloned());
-                p.bbox = p.bbox.union(&l.bbox);
-                continue;
-            }
+        if let Some(p) = out.last_mut()
+            && (p.baseline - l.baseline).abs() < 0.3 * p.size.max(l.size)
+            && l.bbox.x0 > p.bbox.x1
+            && let Some(mut tab) = p.runs.last().cloned()
+        {
+            tab.text.clear();
+            tab.tab = true;
+            p.runs.push(tab);
+            p.runs.extend(l.runs.iter().cloned());
+            p.bbox = p.bbox.union(&l.bbox);
+            continue;
         }
         out.push(l.clone());
     }
