@@ -67,6 +67,15 @@ impl Settings {
 mod tests {
     use super::*;
 
+    fn settings_test_dir(case: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "pdfword-settings-{case}-{}",
+            std::process::id()
+        ));
+        fs::create_dir(&dir).expect("無法建立設定測試資料夾");
+        dir
+    }
+
     #[test]
     fn roundtrip_and_missing_fields() {
         let s = Settings { output_dir: Some(PathBuf::from("D:/輸出")), theme: 2, ..Default::default() };
@@ -80,9 +89,7 @@ mod tests {
 
     #[test]
     fn save_replaces_settings_and_cleans_up_after_failed_commit() {
-        let dir =
-            std::env::temp_dir().join(format!("pdfword-settings-test-{}", std::process::id()));
-        fs::create_dir(&dir).expect("無法建立設定測試資料夾");
+        let dir = settings_test_dir("blocked-directory");
         let target = dir.join("settings.json");
         let mut settings = Settings::default();
         settings.save_to(&target).expect("首次儲存設定應成功");
@@ -95,10 +102,52 @@ mod tests {
         fs::create_dir(&blocked).unwrap();
         assert!(settings.save_to(&blocked).is_err());
         assert!(blocked.is_dir());
-        assert_eq!(fs::read_dir(&dir).unwrap().count(), 2, "不應留下設定暫存檔");
+        let mut entries: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        entries.sort_unstable();
+        assert_eq!(entries, [blocked, target], "不應留下設定暫存檔");
 
-        fs::remove_dir(blocked).unwrap();
-        fs::remove_file(target).unwrap();
-        fs::remove_dir(dir).unwrap();
+        // 交由遞迴刪除處理整棵測試目錄，避免在 Windows 逐項刪除後立刻移除父目錄。
+        fs::remove_dir_all(&dir).expect("無法清理設定測試資料夾");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_settings_replacement_preserves_original_file() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let dir = settings_test_dir("locked-file");
+        let target = dir.join("settings.json");
+        let mut settings = Settings::default();
+        settings.save_to(&target).expect("首次儲存設定應成功");
+        let original = fs::read(&target).unwrap();
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&target)
+            .expect("無法獨占開啟現有設定檔");
+
+        settings.theme = 2;
+        settings
+            .save_to(&target)
+            .expect_err("設定檔仍被獨占開啟時應無法取代");
+        drop(lock);
+        assert_eq!(fs::read(&target).unwrap(), original, "提交失敗應保留原設定");
+        let entries: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(
+            entries.as_slice(),
+            std::slice::from_ref(&target),
+            "提交失敗不應留下設定暫存檔"
+        );
+
+        settings.save_to(&target).expect("解除鎖定後應可儲存設定");
+        let loaded: Settings = serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
+        assert_eq!(loaded, settings);
+        fs::remove_dir_all(&dir).expect("無法清理設定測試資料夾");
     }
 }
